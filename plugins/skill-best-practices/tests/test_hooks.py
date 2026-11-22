@@ -196,7 +196,11 @@ WORD_LIMIT = "two content words as the target and three at most"
 
 
 def rule_5_scope_violations(item):
-    """Ways rule 5 lets the prefix or the shapes escape the clause for a new or wholly renamed plugin."""
+    """Ways rule 5 lets the prefix, the shapes or the word limit escape the new-plugin clause.
+
+    A keyword check: it catches the mandates in the spec's mutation table and close
+    paraphrases of them, not every possible wording. Review covers the rest.
+    """
     start, end = item.find(NEW_PLUGIN_CLAUSE), item.find(EXISTING_PLUGIN_CLAUSE)
     if start < 0 or end < 0 or end < start:
         return ["the new-plugin and existing-plugin clauses are missing or out of order"]
@@ -207,7 +211,11 @@ def rule_5_scope_violations(item):
     if "a skill outside any plugin is not given a prefix" not in after:
         problems.append("the clause for a skill outside any plugin is missing after the existing-plugin clause")
     for where, part in (("before", before), ("after", after)):
-        problems += [f"{word!r} appears {where} the new-plugin clause" for word in ("shape", "`short-") if word in part]
+        text = part.lower()
+        for allowed in ("prefixed or not", "is not given a prefix"):
+            text = text.replace(allowed, "")
+        problems += [f"{word!r} appears {where} the new-plugin clause"
+                     for word in ("shape", "`short-", "short name", "content words", "prefix") if word in text]
     return problems
 
 
@@ -218,23 +226,35 @@ def practice_9_section(text):
     return "\n".join(lines[start:end])
 
 
+PRACTICE_9_SCOPE = "Items 1 to 4 describe the names in a new plugin or in one renamed as a whole"
+PRACTICE_9_ITEM_1 = "1. **Every skill name starts with the plugin's short name.**"
+PRACTICE_9_ITEM_5 = "5. **Existing names are not renamed piecemeal.**"
+QUANTIFIERS = ("every skill", "each skill", "any skill", "all skills", "skill names",
+               "every name", "each name", "all names")
+MANDATE_WORDS = ("shape", "prefix", "short name", "`short-")
+
+
 def practice_9_scope_violations(section):
-    """Ways Practice 9 lets its naming rules apply beyond the plugins they are for."""
-    problems = []
-    scope = "Items 1 to 4 describe the names in a new plugin or in one renamed as a whole"
-    first_item = "1. **Every skill name starts with the plugin's short name.**"
-    i, j = section.find(scope), section.find(first_item)
-    if i < 0 or j < 0 or j < i:
-        problems.append("the scope statement is missing or does not come before item 1")
-    else:
-        paragraph = section[i:section.find("\n\n", i)]
-        problems += [f"the scope paragraph lacks {need!r}" for need in
-                     ("follows that plugin's current names", "is not given a prefix") if need not in paragraph]
+    """Ways Practice 9 lets its naming rules apply beyond the plugins they are for.
+
+    The text from the scope paragraph up to item 5 is scoped by that paragraph and is
+    not searched. Elsewhere, a sentence or table row that speaks of every, each, any or
+    all skills or names may not mention a shape, a prefix or the short name. A keyword
+    check, like rule_5_scope_violations: open-ended paraphrases are left to review.
+    """
     import re
-    for sentence in re.split(r"(?<=[.!?:;])\s+", section):
+    problems = []
+    i, j, k = section.find(PRACTICE_9_SCOPE), section.find(PRACTICE_9_ITEM_1), section.find(PRACTICE_9_ITEM_5)
+    if i < 0 or j < 0 or k < 0 or not i < j < k:
+        return ["the scope statement, item 1 and item 5 are missing or out of order"]
+    paragraph = section[i:section.find("\n\n", i)]
+    problems += [f"the scope paragraph lacks {need!r}" for need in
+                 ("follows that plugin's current names", "is not given a prefix") if need not in paragraph]
+    outside = section[:i] + "\n" + section[k:]
+    for sentence in re.split(r"(?<=[.!?:;])\s+|\n", outside):
         lowered = sentence.lower()
-        if ("every skill" in lowered or "all skills" in lowered) and ("shape" in lowered or "prefix" in lowered):
-            problems.append(f"a sentence applies a shape or prefix to every skill: {sentence.strip()[:80]!r}")
+        if any(q in lowered for q in QUANTIFIERS) and any(w in lowered for w in MANDATE_WORDS):
+            problems.append(f"a sentence applies a naming rule to every skill: {sentence.strip()[:80]!r}")
     return problems
 
 
@@ -314,7 +334,7 @@ class SkillWritingReminder(unittest.TestCase):
     def test_new_skill_in_existing_plugin_keeps_its_names(self):
         item = self.rule_5("Write", "/repo/skills/y/SKILL.md")
         for phrase in (NEW_PLUGIN_CLAUSE, "follows that plugin's current names, prefixed or not",
-                       "renamed as a whole or not at all"):
+                       "renamed as a whole or not at all", "unless replacing one is the intent"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, item)
 
@@ -324,8 +344,13 @@ class SkillWritingReminder(unittest.TestCase):
 
     # spec-example: skill-writing-reminder / an unconditional shape mandate fails the rule 5 scope check
     def test_unconditional_shape_mandate_fails_the_rule_5_scope_check(self):
-        mutated = self.rule_5() + " All skills must use these shapes."
-        self.assertNotEqual(rule_5_scope_violations(mutated), [])
+        item = self.rule_5()
+        for sentence in ("All skills must use these shapes.", "Shapes apply to every skill.",
+                         "Every skill name starts with the plugin's short name.",
+                         "Every skill must be prefixed with the plugin name.",
+                         "Aim for two content words as the target and three at most."):
+            with self.subTest(sentence=sentence):
+                self.assertNotEqual(rule_5_scope_violations(item + " " + sentence), [])
 
     # spec-example: skill-writing-reminder / the five shapes and the word limit
     def test_five_shapes_and_the_word_limit(self):
@@ -374,10 +399,14 @@ class PracticeLists(unittest.TestCase):
     # spec-example: skill-writing-reminder / an unconditional shape mandate fails the Practice 9 scope check
     def test_unconditional_shape_mandate_fails_the_practice_9_scope_check(self):
         section = practice_9_section(self.SKILL.read_text(encoding="utf-8"))
-        table_end = "| Norms and personas (loaded as guidance) | `short-noun` | `axiom-statistics` (illustrative) |"
-        self.assertIn(table_end, section)
-        mutated = section.replace(table_end, table_end + "\n\nUse the five shapes for every skill.")
-        self.assertNotEqual(practice_9_scope_violations(mutated), [])
+        item_5 = section.index(PRACTICE_9_ITEM_5)
+        insert_at = section.index("\n", item_5)
+        for line in ("Use the five shapes for every skill.", "Use the five shapes for each skill.",
+                     "Shapes apply to any skill.", "All skill names carry the prefix.",
+                     "Prefix every name with the short name."):
+            with self.subTest(line=line):
+                mutated = section[:insert_at] + "\n\n" + line + section[insert_at:]
+                self.assertNotEqual(practice_9_scope_violations(mutated), [])
 
 
 class HooksManifest(unittest.TestCase):
