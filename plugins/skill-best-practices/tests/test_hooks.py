@@ -345,16 +345,21 @@ class SkillWritingReminder(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             env = {**os.environ, "TMPDIR": tmp}
             _, first, _ = run(self.SCRIPT, payload("Edit", "/repo/skills/y/SKILL.md", "s-1"), env)
-            _, second, _ = run(self.SCRIPT, payload("Write", "/repo/skills/z/SKILL.md", "s-1"), env)
+            code, second, err = run(self.SCRIPT, payload("Write", "/repo/skills/z/SKILL.md", "s-1"), env)
             _, other, _ = run(self.SCRIPT, payload("Edit", "/repo/skills/y/SKILL.md", "s-2"), env)
-        self.assertEqual(second.strip(), "", "a different SKILL.md in the same session must get nothing")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(second, "", "a different SKILL.md in the same session must print nothing")
+        expected = rule_5_item((PLUGIN / "rules" / "skill-writing.md").read_text(encoding="utf-8"))
         for out in (first, other):
             context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-            self.assertTrue(any(l.startswith(RULE_5_START) for l in context.splitlines()))
+            self.assertEqual(rule_5_item(context), expected)
 
     # spec-example: skill-writing-reminder / a path that only ends in SKILL.md gets no reminder
     def test_path_that_only_ends_in_skill_md_is_silent(self):
-        self.assertIsNone(self.context("Edit", "/repo/skills/y/NOT-SKILL.md"))
+        code, out, err = run(self.SCRIPT, {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                                           "tool_input": {"file_path": "/repo/skills/y/NOT-SKILL.md"}})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "")
 
     def rule_5(self, tool="Edit", path="/repo/skills/y/SKILL.md"):
         """The rule 5 item of the reminder, so assertions cannot be met by text elsewhere."""
