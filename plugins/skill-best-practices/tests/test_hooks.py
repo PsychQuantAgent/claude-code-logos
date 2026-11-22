@@ -269,15 +269,15 @@ class PracticeLists(unittest.TestCase):
 
     # spec-example: skill-writing-reminder / four places list Practice 9
     def test_four_places_list_practice_9(self):
-        skill = (PLUGIN / "skills" / "skill-best-practices" / "SKILL.md").read_text()
+        skill = (PLUGIN / "skills" / "skill-best-practices" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("## Practice 9: Names Identify, Descriptions Get Found", skill)
         audit = [line for line in skill.splitlines()
                  if line.split(". ", 1)[0].isdigit() and line.rstrip().endswith("(Practice 9)")]
         self.assertTrue(audit, "no audit question ends with (Practice 9)")
-        research = (PLUGIN / "CLAUDE.md").read_text()
+        research = (PLUGIN / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("| 9 | Names identify, descriptions get found | Furnas, Landauer, Gomez, & Dumais (1987) |",
                       research)
-        self.assertIn("Nine evidence-based practices", (self.REPO / "README.md").read_text())
+        self.assertIn("Nine evidence-based practices", (self.REPO / "README.md").read_text(encoding="utf-8"))
 
 
 class HooksManifest(unittest.TestCase):

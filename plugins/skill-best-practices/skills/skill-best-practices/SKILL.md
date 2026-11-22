@@ -334,7 +334,7 @@ Before a skill asks the user anything, check:
 
 **How to apply**:
 
-The name follows one grammar across a collection. Anthropic's skill authoring guide recommends gerund forms and asks a collection to avoid inconsistent patterns; this grammar keeps the second point and replaces gerunds with a shape for each kind of skill:
+The name follows one grammar across a collection. Anthropic's skill authoring guide recommends gerund forms and asks a collection to avoid inconsistent patterns; this grammar, decided in PsychQuant/che-plugin-devtools#74, keeps the second point and replaces gerunds with a shape for each kind of skill:
 
 1. **Every skill name starts with the plugin's short name.** The short name is one word, unique across plugins, and different from every built-in command and bundled skill. This applies to new plugins and to plugins renamed as a whole; a new skill in an existing plugin whose names have no prefix follows that plugin's convention (item 5). Namespacing (`plugin-name:skill-name`) separates two plugins' skills when the namespace is typed; when it is not, the documentation does not say which one runs, and a prefix removes the question.
 2. **The shape follows what the skill does.** Five kinds, and only these five:
@@ -349,8 +349,8 @@ The name follows one grammar across a collection. Anthropic's skill authoring gu
 
 3. **Two content words is the target; three is the maximum.** `to` and similar function words do not count. A third word is allowed only when the plugin handles several kinds of object and the verb alone would not say which; the noun then comes before the verb.
 4. **`-to-` is reserved for conversion.** Each product gets its own skill. Other conversion spellings (`X2Y`, `Y-from-X`, `convert-X-Y`, `export-Y`) are not used. Nouns are singular; no invented abbreviations; common format names such as `srt` and `pdf` are fine.
-5. **Existing names are not renamed piecemeal.** A new skill follows its plugin's current convention, so one plugin never mixes two shapes; when a plugin is renamed, it is renamed as a whole.
-6. **Say the name as "I want to ___".** It should give back the skill's main action and object. This checks that the name is precise; per Furnas (p. 967) it does not show that others will guess it.
+5. **Existing names are not renamed piecemeal.** A new skill follows its plugin's current convention, so one plugin never mixes two shapes; when a plugin is renamed, it is renamed as a whole (PsychQuant/che-plugin-devtools#74).
+6. **Say the name as "I want to ___".** It should give back the skill's main action and object (the test from PsychQuant/che-plugin-devtools#28). This checks that the name is precise; per Furnas (p. 967) it does not show that others will guess it.
 
 The description carries the words people use:
 
