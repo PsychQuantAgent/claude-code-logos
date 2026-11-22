@@ -4,7 +4,8 @@ description: |
   Evidence-based practices for writing better Claude Code skills.
   Use when creating new skills, reviewing existing skills, or when a skill
   isn't performing as expected. Also triggers when user says "improve skill",
-  "skill not working", "why did it skip steps", "audit skill".
+  "skill not working", "why did it skip steps", "audit skill", "name a skill",
+  "what should I call this skill", "skill naming", "skill doesn't trigger".
 argument-hint: "[skill-path or topic]"
 ---
 
@@ -323,6 +324,67 @@ Before a skill asks the user anything, check:
 
 ---
 
+## Practice 9: Names Identify, Descriptions Get Found
+
+> A skill's name is how it is called and told apart. Its description is how it is found. No name can be counted on to be guessed.
+
+**Research**: Furnas, Landauer, Gomez & Dumais (1987) collected the words people spontaneously use for objects in five domains, among them text-editing operations, commands for a message decoder and recipes. Two people applied the same term to an object with probability .07 to .18 (p. 966). When one person chose the name, which the authors call "armchair naming", other untutored people failed to reach the object on 80 to 90 percent of their attempts, and domain experts named no better (p. 966). Requiring names to be unique lowered the already low success rates by a further 5 to 60 percent of their value (typically about 10 percent), and "constraining names to be multiple word strings, systematic, 'cute,' or even 'mnemonic,' is certain to result in even less likely first-try success" (p. 966). Even the term people used most often failed 65 to 85 percent of the time, from which the authors concluded that "there can exist no rules, guidelines or procedures for choosing a good name, in the sense of 'accessible to the unfamiliar user'" (p. 967). Their remedy was many alternative access words per object: for the service in their naming exercise, one person rarely thought of more than half a dozen names, while people together suggested over a hundred (p. 968). Words that failed at first can be added to the index once the user finds what they wanted, a method they call adaptive indexing (p. 970). For commands too consequential to run on a guess, the aliases act as an index that leads to the standard name, and "actual execution would always be via the standard 'name'" (p. 969). In a footnote they add that a systematic structure "can lead to predictable patterns of official terminology, perhaps allowing users to predict some terminology from others" (p. 968).
+
+**Application to skills**: A skill has two parts that match the two roles in the paper. The name is the standard term: it is what a user types after `/` and what Claude calls, and the skill listing always contains every name, while descriptions are dropped to fit the budget when there are many skills, starting with the skills used least (Claude Code skills documentation, read 2026-11-21). The description plays the part of the alias list: it carries the words through which a request reaches the skill. Furnas and colleagues studied people guessing names for system objects, not a model matching a request against a skill listing, so applying their findings here is an analogy. What carries over is the division of labour. No naming rule makes a name guessable, so a name is judged by whether it is unique, precise and consistent with the other names in its plugin; whether people find the skill is the description's job. Two Claude Code behaviours make uniqueness a design problem and not just good manners: two plugins can each ship a skill named `search` and both load, and the documentation does not say which one runs when the user types only `/search`; a personal or project skill with the same name as a built-in command replaces that command. One observed case shows both roles failing at once: a user who wanted the subtitles of a recording typed `/plaud-to-srt`, but the skill was named `plaud-srt`, and the step it depended on was named `plaud-index`, after its internal mechanism, with a description about searching.
+
+**How to apply**:
+
+The name follows one grammar across a collection. Anthropic's skill authoring guide recommends gerund forms and asks a collection to avoid inconsistent patterns; this grammar keeps the second point and replaces gerunds with a shape for each kind of skill:
+
+1. **Every skill name starts with the plugin's short name.** The short name is one word, unique across plugins, and different from every built-in command and bundled skill. Namespacing (`plugin-name:skill-name`) separates two plugins' skills when the namespace is typed; when it is not, the documentation does not say which one runs, and a prefix removes the question.
+2. **The shape follows what the skill does.** Five kinds, and only these five:
+
+   | Kind | Shape | Example |
+   |---|---|---|
+   | Conversion (one source becomes one product) | `short-to-product` | `plaud-to-srt` |
+   | Action | `short-[object-]verb` | `idd-close`, `hd-mcp-deploy` |
+   | Query or settings | `short-noun` | `codex-status`, `codex-config` |
+   | Orchestration (runs several steps or agents) | `short-mode`, a noun naming how it runs (`all`, `batch`, `loop`, `chain`, `ensemble`) | `idd-all`, `codex-batch` |
+   | Norms and personas (loaded as guidance) | `short-noun` | `axiom-statistics` (illustrative) |
+
+3. **Two content words is the target; three is the maximum.** `to` and similar function words do not count. A third word is allowed only when the plugin handles several kinds of object and the verb alone would not say which; the noun then comes before the verb.
+4. **`-to-` is reserved for conversion.** Each product gets its own skill. Other conversion spellings (`X2Y`, `Y-from-X`, `convert-X-Y`, `export-Y`) are not used. Nouns are singular; no invented abbreviations; common format names such as `srt` and `pdf` are fine.
+5. **Existing names are not renamed piecemeal.** A new skill follows its plugin's current convention, so one plugin never mixes two shapes; when a plugin is renamed, it is renamed as a whole.
+6. **Say the name as "I want to ___".** It should give back the skill's main action and object. This checks that the name is precise; per Furnas (p. 967) it does not show that others will guess it.
+
+The description carries the words people use:
+
+7. **The description lists the words users actually say for the job**, several phrasings and not one, including the names of the objects and formats involved. One person thinks of only a handful of them (p. 968), so collect wordings from real requests, not only from the author.
+8. **When a user's wording fails to reach a skill, add that wording to the description** (adaptive indexing, p. 970). Renaming the skill to that one word does not help the next user, who is likely to use yet another word (p. 966).
+
+**Before (one name, one word for finding it)**:
+```markdown
+---
+name: srt
+description: Export transcript.
+---
+```
+
+**After (a name that identifies, a description that can be found)**:
+```markdown
+---
+name: plaud-to-srt
+description: |
+  Turn a Plaud recording into an SRT subtitle file. Use when the user wants the
+  subtitles, captions, SRT or a timed transcript of a recording, or asks to
+  "get the subtitles of this recording".
+---
+```
+
+The "After" name is unique by its prefix, has the conversion shape, and passes the "I want to ___" test ("I want to turn a Plaud recording into SRT"). The description, not the name, carries "subtitles", "captions" and "timed transcript". The descriptions above are illustrative, not copied from a published skill.
+
+**Runtime delivery**: the existing `PreToolUse` hook on `Write|Edit` adds `rules/skill-writing.md`, which includes the Practice 9 rule, the first time a `SKILL.md` is written or edited in a session. No hook checks names. Checking names when a skill is created, and auditing existing names, belong to `harness-devtools` (PsychQuant/che-plugin-devtools#74), which cites this practice.
+
+**Sources**:
+- Furnas, G. W., Landauer, T. K., Gomez, L. M., & Dumais, S. T. (1987). The vocabulary problem in human-system communication. *Communications of the ACM, 30*(11), 964–971. https://doi.org/10.1145/32206.32212
+
+---
+
 ## How to Use This Skill
 
 ### Audit an existing skill
@@ -344,3 +406,4 @@ If Claude keeps skipping steps or producing shallow output, check:
 6. Is the critical step labeled as important? (Practice 6)
 7. Does every verification step name what to Read, not just what to search? (Practice 7)
 8. Does every question the skill asks change what happens next, with irreversible steps confirmed once as a batch? (Practice 8)
+9. Does the name start with the plugin's short name and take the shape for its kind, and does the description list the words users actually say for the job? (Practice 9)

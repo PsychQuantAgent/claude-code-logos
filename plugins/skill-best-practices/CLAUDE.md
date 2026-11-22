@@ -38,3 +38,4 @@ The tests feed synthetic hook payloads on stdin and check the scripts' stdout.
 | 6 | Salient labeling | Tversky & Kahneman (1981); Mayer (2009) |
 | 7 | Search locates, reading decides | Simon (1956); Pirolli & Card (1999); Klayman & Ha (1987) |
 | 8 | Ask only when the answer changes the next step | Horvitz (1999); Mark, Gudith, & Klocke (2008); Altmann & Trafton (2002); Ancker et al. (2017) |
+| 9 | Names identify, descriptions get found | Furnas, Landauer, Gomez, & Dumais (1987) |
