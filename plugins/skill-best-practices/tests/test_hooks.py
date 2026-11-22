@@ -186,6 +186,125 @@ class SessionStartRule(unittest.TestCase):
         self.assertIn("Ask only when the answer changes the next step", text)
 
 
+RULE_5_START = "5. **Names identify, descriptions get found**"
+NEW_PLUGIN_CLAUSE = "in a new plugin, or one renamed as a whole"
+EXISTING_PLUGIN_CLAUSE = "a new skill in an existing plugin"
+SHAPE_PAIRS = ("conversion `short-to-product`", "action `short-[object-]verb`",
+               "query or settings `short-noun`", "orchestration `short-mode`",
+               "norms and personas `short-noun`")
+WORD_LIMIT = "two content words as the target and three at most"
+
+
+def rule_5_item(text):
+    """The whole rule 5 list item as the hook delivers it: its line and every following blank or indented line."""
+    lines = text.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith(RULE_5_START)]
+    assert len(starts) == 1, "the reminder must hold exactly one rule 5 item"
+    end = starts[0] + 1
+    while end < len(lines) and (lines[end] == "" or lines[end][:1] in (" ", "\t")):
+        end += 1
+    return "\n".join(lines[starts[0]:end]).rstrip()
+
+
+def rule_5_scope_violations(item):
+    """Ways rule 5 lets the prefix, the shapes or the word limit escape the new-plugin clause.
+
+    A keyword check: it catches the mandates in the spec's mutation table and close
+    paraphrases of them, not every possible wording. Review covers the rest.
+    """
+    start, end = item.find(NEW_PLUGIN_CLAUSE), item.find(EXISTING_PLUGIN_CLAUSE)
+    if start < 0 or end < 0 or end < start:
+        return ["the new-plugin and existing-plugin clauses are missing or out of order"]
+    before, clause, after = item[:start], item[start:end], item[end:]
+    problems = [f"the new-plugin clause lacks {need!r}"
+                for need in ("starts with the plugin's short name", *SHAPE_PAIRS, WORD_LIMIT)
+                if need not in clause]
+    if "a skill outside any plugin is not given a prefix" not in after:
+        problems.append("the clause for a skill outside any plugin is missing after the existing-plugin clause")
+    for where, part in (("before", before), ("after", after)):
+        text = part.lower()
+        for allowed in ("prefixed or not", "is not given a prefix"):
+            text = text.replace(allowed, "")
+        problems += [f"{word!r} appears {where} the new-plugin clause"
+                     for word in ("shape", "`short-", "short name", "content words", "prefix") if word in text]
+    return problems
+
+
+def practice_9_section(text):
+    lines = text.splitlines()
+    start = lines.index("## Practice 9: Names Identify, Descriptions Get Found")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "\n".join(lines[start:end])
+
+
+PRACTICE_9_SCOPE = "Items 1 to 4 describe the names in a new plugin or in one renamed as a whole"
+PRACTICE_9_ITEM_1 = "1. **Every skill name starts with the plugin's short name.**"
+PRACTICE_9_ITEM_5 = "5. **Existing names are not renamed piecemeal.**"
+QUANTIFIERS = ("every skill", "each skill", "any skill", "all skills", "skill names",
+               "every name", "each name", "all names")
+MANDATE_WORDS = ("shape", "prefix", "short name", "`short-")
+
+
+def _block_end(lines, start):
+    """Index after the item starting at `start`: its line plus following blank or indented lines."""
+    end = start + 1
+    while end < len(lines) and (lines[end] == "" or lines[end][:1] in (" ", "\t")):
+        end += 1
+    return end
+
+
+def practice_9_scope_violations(section):
+    """Ways Practice 9 lets its naming rules apply beyond the plugins they are for.
+
+    Only the scope paragraph and the blocks of items 1 to 4 (each item's line and the
+    indented lines below it) are skipped. Elsewhere, the lines of a paragraph are joined
+    and split into sentences at ". ", "! " or "? ", and each table row is one sentence;
+    a sentence that speaks of every, each, any or all skills or names may not mention a
+    shape, a prefix or the short name. A keyword check: the spec's mutation table is a
+    sample of edits it reports, and review covers rewordings outside it.
+    """
+    import re
+    lines = section.splitlines()
+    scope = next((i for i, l in enumerate(lines) if PRACTICE_9_SCOPE in l), None)
+    item_1 = next((i for i, l in enumerate(lines) if l.startswith(PRACTICE_9_ITEM_1)), None)
+    if scope is None or item_1 is None or not scope < item_1:
+        return ["the scope statement is missing or does not come before item 1"]
+    first = scope
+    while first > 0 and lines[first - 1].strip():
+        first -= 1
+    last = scope
+    while last + 1 < len(lines) and lines[last + 1].strip():
+        last += 1
+    paragraph = " ".join(lines[first:last + 1])
+    problems = [f"the scope paragraph lacks {need!r}" for need in
+                ("follows that plugin's current names", "is not given a prefix") if need not in paragraph]
+    skipped = set(range(first, last + 1))
+    for i, line in enumerate(lines):
+        if re.match(r"[1-4]\. ", line):
+            skipped.update(range(i, _block_end(lines, i)))
+    units, prose = [], []
+    for i, line in enumerate(lines + [""]):
+        text = "" if i in skipped else line.strip()
+        if text.startswith("|"):
+            units.append(text)
+            text = ""
+        if text:
+            prose.append(text)
+        elif prose:
+            units += re.split(r"(?<=[.!?])\s+", " ".join(prose))
+            prose = []
+    for unit in units:
+        lowered = unit.lower()
+        if any(q in lowered for q in QUANTIFIERS) and any(w in lowered for w in MANDATE_WORDS):
+            problems.append(f"a sentence applies a naming rule to every skill: {unit[:80]!r}")
+    return problems
+
+
+def table_line_below_table_line(lines, row):
+    """The row is a whole line, directly below another table line."""
+    return row in lines and lines.index(row) > 0 and lines[lines.index(row) - 1].startswith("|")
+
+
 class SkillWritingReminder(unittest.TestCase):
     SCRIPT = "skill_writing_reminder.py"
 
@@ -214,19 +333,141 @@ class SkillWritingReminder(unittest.TestCase):
         self.assertIsNone(self.context("Edit", "/repo/README.md"))
         self.assertIsNone(self.context("Edit", "/repo/skills/y/NOTSKILL.md"))
 
+    # spec-example: skill-writing-reminder / a second skill edit in the session gets no reminder
     def test_injected_once_per_session(self):
         import os
         import tempfile
+
+        def payload(tool, path, session):
+            return {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": session,
+                    "tool_input": {"file_path": path}}
+
         with tempfile.TemporaryDirectory() as tmp:
             env = {**os.environ, "TMPDIR": tmp}
-            payload = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "session_id": "s-1",
-                       "tool_input": {"file_path": "/repo/skills/y/SKILL.md"}}
-            _, first, _ = run(self.SCRIPT, payload, env)
-            _, second, _ = run(self.SCRIPT, payload, env)
-            _, other, _ = run(self.SCRIPT, {**payload, "session_id": "s-2"}, env)
-        self.assertTrue(first.strip())
-        self.assertEqual(second.strip(), "")
-        self.assertTrue(other.strip())
+            _, first, _ = run(self.SCRIPT, payload("Edit", "/repo/skills/y/SKILL.md", "s-1"), env)
+            code, second, err = run(self.SCRIPT, payload("Write", "/repo/skills/z/SKILL.md", "s-1"), env)
+            _, other, _ = run(self.SCRIPT, payload("Edit", "/repo/skills/y/SKILL.md", "s-2"), env)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(second, "", "a different SKILL.md in the same session must print nothing")
+        expected = rule_5_item((PLUGIN / "rules" / "skill-writing.md").read_text(encoding="utf-8"))
+        for out in (first, other):
+            context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+            self.assertEqual(rule_5_item(context), expected)
+
+    # spec-example: skill-writing-reminder / a path that only ends in SKILL.md gets no reminder
+    def test_path_that_only_ends_in_skill_md_is_silent(self):
+        code, out, err = run(self.SCRIPT, {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                                           "tool_input": {"file_path": "/repo/skills/y/NOT-SKILL.md"}})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "")
+
+    def rule_5(self, tool="Edit", path="/repo/skills/y/SKILL.md"):
+        """The rule 5 item of the reminder, so assertions cannot be met by text elsewhere."""
+        text = self.context(tool, path)
+        self.assertIsNotNone(text)
+        return rule_5_item(text)
+
+    # spec-example: skill-writing-reminder / rule 5 names Practice 9 and its source
+    def test_rule_5_names_practice_9_and_its_source(self):
+        item = self.rule_5("Edit", "/repo/plugins/x/skills/y/SKILL.md")
+        for phrase in ("(Practice 9)", "(Furnas et al., 1987)", "no name can be relied on to be guessed by people unfamiliar with it",
+                       "This item summarizes Practice 9", "read Practice 9 before choosing a name"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, item)
+
+    # spec-example: skill-writing-reminder / a new skill in an existing plugin keeps the plugin's names
+    def test_new_skill_in_existing_plugin_keeps_its_names(self):
+        item = self.rule_5("Write", "/repo/skills/y/SKILL.md")
+        for phrase in (NEW_PLUGIN_CLAUSE, "follows that plugin's current names, prefixed or not",
+                       "renamed as a whole or not at all",
+                       "its name is checked against built-in commands and bundled skills unless replacing one is the intent"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, item)
+
+    # spec-example: skill-writing-reminder / the shapes apply only in a new or wholly renamed plugin
+    def test_shapes_apply_only_in_new_or_wholly_renamed_plugin(self):
+        self.assertEqual(rule_5_scope_violations(self.rule_5()), [])
+
+    # spec-example: skill-writing-reminder / an unconditional shape mandate fails the rule 5 scope check
+    def test_unconditional_shape_mandate_fails_the_rule_5_scope_check(self):
+        item = self.rule_5()
+        for sentence in ("All skills must use these shapes.", "Shapes apply to every skill.",
+                         "Every skill name starts with the plugin's short name.",
+                         "Every skill must be prefixed with the plugin name.",
+                         "Aim for two content words as the target and three at most."):
+            with self.subTest(sentence=sentence):
+                self.assertNotEqual(rule_5_scope_violations(item + " " + sentence), [])
+        # last row: an indented continuation line of item 5, taken through the same extractor
+        text = self.context("Edit", "/repo/skills/y/SKILL.md")
+        lines = text.splitlines()
+        at = next(i for i, line in enumerate(lines) if line.startswith(RULE_5_START)) + 1
+        mutated = "\n".join(lines[:at] + ["   All skills must use these shapes."] + lines[at:])
+        self.assertNotEqual(rule_5_scope_violations(rule_5_item(mutated)), [])
+
+    # spec-example: skill-writing-reminder / the five shapes and the word limit
+    def test_five_shapes_and_the_word_limit(self):
+        item = self.rule_5()
+        for row in (*SHAPE_PAIRS, WORD_LIMIT):
+            with self.subTest(row=row):
+                self.assertIn(row, item)
+
+    # spec-example: skill-writing-reminder / a failed wording goes into the description
+    def test_failed_wording_goes_into_the_description(self):
+        item = self.rule_5()
+        self.assertIn("The description lists the words users actually say for the job, several phrasings and not one, "
+                      "each as a short phrase with no private details", item)
+        self.assertIn("a wording that once failed to reach the skill is added to the description in the same way", item)
+
+
+class PracticeLists(unittest.TestCase):
+    SKILL = PLUGIN / "skills" / "skill-best-practices" / "SKILL.md"
+
+    # spec-example: skill-writing-reminder / the plugin's own files list Practice 9
+    def test_plugins_own_files_list_practice_9(self):
+        lines = self.SKILL.read_text(encoding="utf-8").splitlines()
+        self.assertIn("## Practice 9: Names Identify, Descriptions Get Found", lines)
+        start = lines.index("### When a skill isn't performing")
+        audit, in_fence = [], False
+        for line in lines[start + 1:]:
+            if line.lstrip().startswith(("```", "~~~")):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if line.lstrip().startswith("#"):
+                break
+            if line.startswith("9. ") and line.rstrip().endswith("? (Practice 9)"):
+                audit.append(line)
+        self.assertEqual(len(audit), 1, "the question numbered 9 must end with '? (Practice 9)'")
+        research = (PLUGIN / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+        self.assertTrue(table_line_below_table_line(
+            research, "| 9 | Names identify, descriptions get found | Furnas, Landauer, Gomez, & Dumais (1987) |"))
+
+    # spec-example: skill-writing-reminder / Practice 9 states where its naming rules apply
+    def test_practice_9_states_where_its_naming_rules_apply(self):
+        section = practice_9_section(self.SKILL.read_text(encoding="utf-8"))
+        self.assertEqual(practice_9_scope_violations(section), [])
+
+    # spec-example: skill-writing-reminder / an unconditional shape mandate fails the Practice 9 scope check
+    def test_unconditional_shape_mandate_fails_the_practice_9_scope_check(self):
+        lines = practice_9_section(self.SKILL.read_text(encoding="utf-8")).splitlines()
+        item_5 = next(i for i, l in enumerate(lines) if l.startswith(PRACTICE_9_ITEM_5))
+        item_1 = next(i for i, l in enumerate(lines) if l.startswith(PRACTICE_9_ITEM_1))
+        table_end = next(i for i, l in enumerate(lines) if "| Norms and personas (loaded as guidance) |" in l)
+        positions = {"after item 5": _block_end(lines, item_5), "before item 1": item_1,
+                     "below the table": table_end + 1}
+        rows = (("Use the five shapes for every skill.", "after item 5"),
+                ("Use the five shapes for each skill.", "after item 5"),
+                ("Shapes apply to any skill.", "after item 5"),
+                ("All skill names carry the prefix.", "after item 5"),
+                ("Prefix every name with the short name.", "after item 5"),
+                ("Use the five shapes for every skill.", "before item 1"),
+                ("Use the five shapes for every skill.", "below the table"))
+        for line, where in rows:
+            with self.subTest(line=line, where=where):
+                at = positions[where]
+                mutated = "\n".join(lines[:at] + ["", line, ""] + lines[at:])
+                self.assertNotEqual(practice_9_scope_violations(mutated), [])
 
 
 class HooksManifest(unittest.TestCase):
