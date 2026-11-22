@@ -1,6 +1,6 @@
 # Skill Writing Best Practices
 
-Delivered by the plugin's `PreToolUse` hook on `Write|Edit` when the target is a `SKILL.md` (once per session). Plugins have no `rules/` component, so this file is never loaded on its own; `scripts/skill_writing_reminder.py` reads it and adds it as context.
+Delivered by the plugin's `PreToolUse` hook on `Write|Edit` when the target is a `SKILL.md` (once per session, when the hook can write its session marker). Plugins have no `rules/` component, so this file is never loaded on its own; `scripts/skill_writing_reminder.py` reads it and adds it as context.
 
 When writing or modifying skills (SKILL.md files), apply these evidence-based principles:
 
