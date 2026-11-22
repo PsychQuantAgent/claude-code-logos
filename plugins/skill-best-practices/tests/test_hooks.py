@@ -228,6 +228,57 @@ class SkillWritingReminder(unittest.TestCase):
         self.assertEqual(second.strip(), "")
         self.assertTrue(other.strip())
 
+    # spec-example: skill-writing-reminder / rule 5 names Practice 9 and its source
+    def test_rule_5_names_practice_9_and_its_source(self):
+        text = self.context("Edit", "/repo/plugins/x/skills/y/SKILL.md")
+        self.assertIsNotNone(text)
+        for phrase in ("Names identify, descriptions get found", "(Practice 9)",
+                       "(Furnas et al., 1987)", "no name can be relied on to be guessed"):
+            self.assertIn(phrase, text)
+
+    # spec-example: skill-writing-reminder / a new skill in an existing plugin keeps the plugin's names
+    def test_new_skill_in_existing_plugin_keeps_its_names(self):
+        text = self.context("Write", "/repo/skills/y/SKILL.md")
+        self.assertIsNotNone(text)
+        for phrase in ("in a new plugin, or one renamed as a whole",
+                       "follows that plugin's current names, prefixed or not",
+                       "renamed as a whole or not at all"):
+            self.assertIn(phrase, text)
+
+    # spec-example: skill-writing-reminder / the five shapes and the word limit
+    def test_five_shapes_and_the_word_limit(self):
+        text = self.context("Edit", "/repo/skills/y/SKILL.md")
+        self.assertIsNotNone(text)
+        rows = ("short-to-product", "short-[object-]verb", "query or settings `short-noun`",
+                "orchestration `short-mode`", "norms and personas `short-noun`",
+                "two content words as the target and three at most")
+        for row in rows:
+            with self.subTest(row=row):
+                self.assertIn(row, text)
+
+    # spec-example: skill-writing-reminder / a failed wording goes into the description
+    def test_failed_wording_goes_into_the_description(self):
+        text = self.context("Edit", "/repo/skills/y/SKILL.md")
+        self.assertIsNotNone(text)
+        self.assertIn("lists the words users actually say for the job", text)
+        self.assertIn("a wording that once failed to reach the skill is added to the description", text)
+
+
+class PracticeLists(unittest.TestCase):
+    REPO = PLUGIN.parents[1]
+
+    # spec-example: skill-writing-reminder / four places list Practice 9
+    def test_four_places_list_practice_9(self):
+        skill = (PLUGIN / "skills" / "skill-best-practices" / "SKILL.md").read_text()
+        self.assertIn("## Practice 9: Names Identify, Descriptions Get Found", skill)
+        audit = [line for line in skill.splitlines()
+                 if line.split(". ", 1)[0].isdigit() and line.rstrip().endswith("(Practice 9)")]
+        self.assertTrue(audit, "no audit question ends with (Practice 9)")
+        research = (PLUGIN / "CLAUDE.md").read_text()
+        self.assertIn("| 9 | Names identify, descriptions get found | Furnas, Landauer, Gomez, & Dumais (1987) |",
+                      research)
+        self.assertIn("Nine evidence-based practices", (self.REPO / "README.md").read_text())
+
 
 class HooksManifest(unittest.TestCase):
     def test_hooks_json_wires_all_three_scripts(self):
