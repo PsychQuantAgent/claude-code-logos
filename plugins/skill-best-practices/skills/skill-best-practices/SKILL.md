@@ -357,7 +357,7 @@ Where a skill lives decides which of these rules apply. Items 1 to 4 describe th
 
 Items 6 to 8 apply to every skill, wherever it lives.
 
-6. **Check that the name says what the skill is.** Expand an action or conversion name into "I want to ___" (the test from PsychQuant/che-plugin-devtools#28). An action name should give back the main action, and the object either named or clear from the plugin (`idd-close` closes an issue). A conversion name should give back its product; the `short-to-product` shape has no slot for the source, so when the plugin does not make the source clear, the description names it. An orchestration name should give back how it runs, and a query, settings or guidance name its topic (the checks for kinds other than action are added here). Either way the check is for precision; per Furnas (p. 967) it does not show that others will guess the name.
+6. **Check that the name says what the skill is.** Expand an action or conversion name into "I want to ___" (the test from PsychQuant/che-plugin-devtools#28). An action name should give back the main action, and the object either named or clear from the plugin (`idd-close` closes an issue). A conversion name should give back its product. Whatever the name's shape, the description names the source when neither the name nor the plugin makes it clear; the `short-to-product` shape has no slot for the source. An orchestration name should give back how it runs, and a query, settings or guidance name its topic (the checks for kinds other than action are added here). Either way the check is for precision; per Furnas (p. 967) it does not show that others will guess the name.
 
 The description carries the words people use:
 
