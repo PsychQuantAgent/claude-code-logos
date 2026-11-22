@@ -247,7 +247,7 @@ class SkillWritingReminder(unittest.TestCase):
     def test_rule_5_names_practice_9_and_its_source(self):
         item = self.rule_5("Edit", "/repo/plugins/x/skills/y/SKILL.md")
         for phrase in ("(Practice 9)", "(Furnas et al., 1987)", "no name can be relied on to be guessed",
-                       "read Practice 9 before choosing a name"):
+                       "This item summarizes Practice 9", "read Practice 9 before choosing a name"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, item)
 
