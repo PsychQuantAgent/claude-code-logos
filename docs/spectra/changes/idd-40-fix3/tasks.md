@@ -1,7 +1,7 @@
 ## 1. Tests first
 
 - [x] 1.1 In plugins/skill-best-practices/tests/test_hooks.py, add "check that the names show the difference rather than differing only by near-synonyms" to item 9's phrase list. The test for the Example "item 9, the audit question and rule 5 flag names that read alike" must fail on 6870d33.
-- [x] 1.2 Rename the fence test to the Example "a fence closes only at its own closing line" and use that Example's seven lines. It must fail with the helper on 6870d33, which also counts "9. Another quoted item".
+- [x] 1.2 Rename the fence test to the Example "a fence closes only at its own closing line" and use that Example's seven lines. It must fail with the helper on 6870d33, which counts "9. Another quoted item" instead of "9. The real item".
 - [x] 1.3 Make `source_problems` also require exactly one entry starting with each work's author-year. Add a mutation subtest that copies an entry without its DOI. That mutation must pass the DOI-only check on 6870d33 and fail the new check.
 
 ## 2. Text and helper

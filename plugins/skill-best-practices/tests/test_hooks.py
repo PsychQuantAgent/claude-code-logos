@@ -222,8 +222,9 @@ ITEM_9_SOURCES = (("Black, J. B., & Moran, T. P. (1982).", "10.1145/800049.80174
 
 
 def source_problems(entries):
-    """What the Sources list gets wrong for item 9's works: for each DOI, exactly one entry contains it,
-    that entry starts with the work's author-year, and its last space-separated token is exactly the DOI URL."""
+    """What the Sources list gets wrong for item 9's works: for each work, exactly one entry starts with its
+    author-year and exactly one entry contains its DOI; that entry starts with the author-year, and its last
+    space-separated token is exactly the DOI URL."""
     problems = []
     for start, doi in ITEM_9_SOURCES:
         starting = [e for e in entries if e.startswith(start)]
@@ -242,8 +243,8 @@ def source_problems(entries):
 
 def numbered_lines_outside_fences(lines, number):
     """Indexes of the lines starting "<number>. " outside code fences. A fence opens at a run of three or more
-    backticks or tildes; it closes only at a line made of the same character, at least as long as that run,
-    with nothing but spaces or tabs after it."""
+    backticks or tildes after any spaces or tabs; it closes only at a line made of the same character, at least
+    as long as that run, with nothing but spaces or tabs before or after it."""
     found, fence = [], None
     for i, line in enumerate(lines):
         if fence is not None:
@@ -251,7 +252,7 @@ def numbered_lines_outside_fences(lines, number):
             if run and set(run) == {fence[0]} and len(run) >= len(fence):
                 fence = None
             continue
-        lead = line.lstrip()
+        lead = line.lstrip(" \t")
         mark = lead[:1]
         if mark in ("`", "~") and len(lead) - len(lead.lstrip(mark)) >= 3:
             fence = mark * (len(lead) - len(lead.lstrip(mark)))
