@@ -588,6 +588,16 @@ class SkillWritingReminder(unittest.TestCase):
                     mock.patch.object(module, "time", clock):
                 code, out = self._run_main(module, self.EDIT_S1)
             listing = sorted(os.listdir(marker_dir)) if os.path.isdir(marker_dir) else None
+            self.lock_free_after = None
+            if listing is not None and ".lock" in listing:
+                probe = os.open(os.path.join(marker_dir, ".lock"), os.O_RDWR)
+                try:
+                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self.lock_free_after = True
+                except BlockingIOError:
+                    self.lock_free_after = False
+                finally:
+                    os.close(probe)
         return code, out, attempts, listing
 
     @staticmethod
@@ -716,43 +726,31 @@ class SkillWritingReminder(unittest.TestCase):
     # spec-example: skill-writing-reminder / a lock taken after the deadline is let go
     @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
     def test_lock_taken_after_the_deadline_is_let_go(self):
-        clock = self._Clock()
+        for taken_at in (5.0, 5.1):
+            with self.subTest(taken_at=taken_at):
+                clock = self._Clock()
 
-        def answer(attempt, now, marker_dir):
-            if now < 4.9:
-                return "busy"
-            clock.now = 5.1  # descheduled inside flock until past the deadline
-            self._mark(marker_dir)
-            return "take"
+                def answer(attempt, now, marker_dir):
+                    if now < 4.9:
+                        return "busy"
+                    clock.now = taken_at  # descheduled inside flock until the deadline or past it
+                    self._mark(marker_dir)
+                    return "take"
 
-        code, out, attempts, _ = self._scripted_lock_run(clock, answer)
-        self.assertEqual(code, 0)
-        self._has_rule_5(out)
+                code, out, attempts, _ = self._scripted_lock_run(clock, answer)
+                self.assertEqual(code, 0)
+                self._has_rule_5(out)
+                self.assertTrue(self.lock_free_after, "the late lock must be released")
 
     # spec-example: skill-writing-reminder / a lock error other than busy sends the reminder at once
     @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
     def test_lock_error_other_than_busy_sends_the_reminder_at_once(self):
         import errno
-        import fcntl
-        import os
-        import tempfile
-        import types
-        from unittest import mock
-        module = self._load_hook()
-        attempts = []
 
-        def flock(fd, op):
-            if op & fcntl.LOCK_EX:
-                attempts.append(op)
-                raise OSError(errno.ENOLCK, "no locks available")
-            return fcntl.flock(fd, op)
+        def answer(attempt, now, marker_dir):
+            raise OSError(errno.ENOLCK, "no locks available")
 
-        fake_fcntl = types.SimpleNamespace(LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB, LOCK_UN=fcntl.LOCK_UN, flock=flock)
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = os.path.realpath(tmp)
-            with mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(module, "fcntl", fake_fcntl):
-                code, out = self._run_main(module, self.EDIT_S1)
-            listing = sorted(os.listdir(os.path.join(tmp, self._marker_dir_name())))
+        code, out, attempts, listing = self._scripted_lock_run(self._Clock(), answer)
         self.assertEqual(code, 0)
         self._has_rule_5(out)
         self.assertEqual(len(attempts), 1)
