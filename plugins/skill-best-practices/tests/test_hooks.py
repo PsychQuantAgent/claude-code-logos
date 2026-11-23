@@ -541,6 +541,7 @@ class SkillWritingReminder(unittest.TestCase):
             self.sleeps = 0
             self.still = still
             self.overshoot = overshoot
+            self.naps = []  # (clock reading, seconds) for each sleep
 
         def monotonic(self):
             return self.now
@@ -550,6 +551,7 @@ class SkillWritingReminder(unittest.TestCase):
             if self.sleeps > 10000:
                 raise AssertionError("the hook kept waiting")
             self.slept += seconds
+            self.naps.append((self.now, seconds))
             if not self.still:
                 self.now += seconds + self.overshoot
 
@@ -605,6 +607,72 @@ class SkillWritingReminder(unittest.TestCase):
         self.assertEqual(len(attempts), 3, "the hook must keep trying while the lock is busy")
         self.assertEqual(out, "", "the marker check must see the marker that appeared before the lock was taken")
 
+    # spec-example: skill-writing-reminder / the print and the marker write happen under the lock
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_print_and_marker_write_happen_under_the_lock(self):
+        import fcntl
+        import os
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        real_open, real_print = os.open, module._print_context
+        seen = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            lock_path = os.path.join(tmp, self._marker_dir_name(), ".lock")
+
+            def lock_is_held():
+                try:
+                    fd = real_open(lock_path, os.O_RDWR)
+                except FileNotFoundError:
+                    return False  # no lock file: the hook took no lock
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return True
+                finally:
+                    os.close(fd)  # closing also drops a lock taken here
+                return False
+
+            def watched_print(rule):
+                seen["print"] = lock_is_held()
+                return real_print(rule)
+
+            def watched_open(path, flags, *args, **kwargs):
+                if isinstance(path, str) and path.endswith(".skill-writing") and flags & os.O_CREAT:
+                    seen["marker"] = lock_is_held()
+                return real_open(path, flags, *args, **kwargs)
+
+            # A mocked os.open is not in os.supports_dir_fd, so the platform check is held at its real answer here.
+            with mock.patch.object(tempfile, "tempdir", tmp), \
+                    mock.patch.object(module, "_can_verify", return_value=module._can_verify()), \
+                    mock.patch.object(module, "_print_context", side_effect=watched_print), \
+                    mock.patch.object(module.os, "open", side_effect=watched_open):
+                code, out = self._run_main(module, self.EDIT_S1)
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertEqual(seen, {"print": True, "marker": True})
+
+    # spec-example: skill-writing-reminder / who may own the temp directory
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_who_may_own_the_temp_directory(self):
+        import os
+        import stat
+        module = self._load_hook()
+        me = os.getuid()
+        rows = [  # (owner, mode, trusted)
+            (me, 0o700, True),
+            (0, 0o1777, True),
+            (me + 1, 0o700, False),
+            (me + 1, 0o1777, False),
+            (me, 0o777, False),
+            (me, 0o1777, True),
+        ]
+        for owner, mode, trusted in rows:
+            with self.subTest(owner=owner, mode=oct(mode)):
+                info = os.stat_result((stat.S_IFDIR | mode, 0, 0, 2, owner, 0, 0, 0, 0, 0))
+                self.assertIs(module._temp_dir_trusted(info), trusted)
+
     # spec-example: skill-writing-reminder / a lock held too long still sends the reminder
     @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
     def test_lock_held_too_long_still_sends_the_reminder(self):
@@ -614,6 +682,8 @@ class SkillWritingReminder(unittest.TestCase):
         self._has_rule_5(out)
         self.assertGreater(len(attempts), 1, "the hook must retry before it gives up")
         self.assertAlmostEqual(clock.slept, 5.0, places=6)
+        long_naps = [(t, d) for t, d in clock.naps if d > 5.0 - t + 1e-9]
+        self.assertEqual(long_naps, [], "no sleep may be longer than the time left")
         self.assertEqual(listing, [".lock"])
 
     # spec-example: skill-writing-reminder / a lock freed after the deadline is not taken
