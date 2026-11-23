@@ -13,8 +13,8 @@ owned by the user or root and is either closed to writes by others or sticky,
 so nobody else can rename the private directory. Everywhere else, and whenever
 a check fails, it sends the reminder and writes no marker. The marker check,
 the print and the marker write run under a lock; no lock attempt starts after
-the wait has run out, and the marker is written only after the context has
-been printed. Owners and permission bits are checked; ACLs are not. Never
+the wait has run out, a lock found taken after it is let go, and the marker is
+written only after the context has been printed. Owners and permission bits are checked; ACLs are not. Never
 decides the call.
 """
 import json
@@ -105,11 +105,13 @@ def _lock(dir_fd):
     while True:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return lock_fd
+            if time.monotonic() < deadline:
+                return lock_fd
+            break  # taken too late: let it go (closing the descriptor releases it)
         except BlockingIOError:
             pass
         except OSError:
-            break
+            break  # an error other than busy ends the wait at once
         left = deadline - time.monotonic()
         if left <= 0:
             break

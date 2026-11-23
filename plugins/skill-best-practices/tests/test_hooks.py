@@ -575,6 +575,8 @@ class SkillWritingReminder(unittest.TestCase):
             def flock(fd, op):
                 if not op & fcntl.LOCK_EX:
                     return fcntl.flock(fd, op)
+                if not op & fcntl.LOCK_NB:
+                    raise AssertionError("an exclusive lock attempt without LOCK_NB would block")
                 attempts.append(clock.now)
                 if answer(len(attempts), clock.now, marker_dir) == "busy":
                     raise BlockingIOError("busy")
@@ -634,14 +636,19 @@ class SkillWritingReminder(unittest.TestCase):
                     os.close(fd)  # closing also drops a lock taken here
                 return False
 
+            events = []
+
             def watched_print(rule):
+                events.append("print")
                 seen["print"] = lock_is_held()
                 return real_print(rule)
 
             def watched_open(path, flags, *args, **kwargs):
-                if isinstance(path, str) and path.endswith(".skill-writing") and flags & os.O_CREAT:
+                fd = real_open(path, flags, *args, **kwargs)
+                if isinstance(path, str) and os.path.basename(path) == "s-1.skill-writing" and flags & os.O_CREAT:
+                    events.append("marker")  # the creation succeeded
                     seen["marker"] = lock_is_held()
-                return real_open(path, flags, *args, **kwargs)
+                return fd
 
             # A mocked os.open is not in os.supports_dir_fd, so the platform check is held at its real answer here.
             with mock.patch.object(tempfile, "tempdir", tmp), \
@@ -649,9 +656,12 @@ class SkillWritingReminder(unittest.TestCase):
                     mock.patch.object(module, "_print_context", side_effect=watched_print), \
                     mock.patch.object(module.os, "open", side_effect=watched_open):
                 code, out = self._run_main(module, self.EDIT_S1)
+            marker_exists = os.path.isfile(os.path.join(tmp, self._marker_dir_name(), "s-1.skill-writing"))
         self.assertEqual(code, 0)
         self._has_rule_5(out)
+        self.assertEqual(events, ["print", "marker"], "the hook prints, then creates the session's marker")
         self.assertEqual(seen, {"print": True, "marker": True})
+        self.assertTrue(marker_exists, "s-1.skill-writing must exist after the run")
 
     # spec-example: skill-writing-reminder / who may own the temp directory
     @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
@@ -681,6 +691,7 @@ class SkillWritingReminder(unittest.TestCase):
         self.assertEqual(code, 0)
         self._has_rule_5(out)
         self.assertGreater(len(attempts), 1, "the hook must retry before it gives up")
+        self.assertEqual([t for t in attempts if t >= 5.0], [], "an attempt started at or after the deadline")
         self.assertAlmostEqual(clock.slept, 5.0, places=6)
         long_naps = [(t, d) for t, d in clock.naps if d > 5.0 - t + 1e-9]
         self.assertEqual(long_naps, [], "no sleep may be longer than the time left")
@@ -700,6 +711,51 @@ class SkillWritingReminder(unittest.TestCase):
         self._has_rule_5(out)
         self.assertTrue(attempts and all(t < 5.0 for t in attempts),
                         f"an attempt started after the deadline: {[t for t in attempts if t >= 5.0]}")
+        self.assertEqual(listing, [".lock"])
+
+    # spec-example: skill-writing-reminder / a lock taken after the deadline is let go
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_taken_after_the_deadline_is_let_go(self):
+        clock = self._Clock()
+
+        def answer(attempt, now, marker_dir):
+            if now < 4.9:
+                return "busy"
+            clock.now = 5.1  # descheduled inside flock until past the deadline
+            self._mark(marker_dir)
+            return "take"
+
+        code, out, attempts, _ = self._scripted_lock_run(clock, answer)
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+
+    # spec-example: skill-writing-reminder / a lock error other than busy sends the reminder at once
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_error_other_than_busy_sends_the_reminder_at_once(self):
+        import errno
+        import fcntl
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+        module = self._load_hook()
+        attempts = []
+
+        def flock(fd, op):
+            if op & fcntl.LOCK_EX:
+                attempts.append(op)
+                raise OSError(errno.ENOLCK, "no locks available")
+            return fcntl.flock(fd, op)
+
+        fake_fcntl = types.SimpleNamespace(LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB, LOCK_UN=fcntl.LOCK_UN, flock=flock)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            with mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(module, "fcntl", fake_fcntl):
+                code, out = self._run_main(module, self.EDIT_S1)
+            listing = sorted(os.listdir(os.path.join(tmp, self._marker_dir_name())))
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertEqual(len(attempts), 1)
         self.assertEqual(listing, [".lock"])
 
     # spec-example: skill-writing-reminder / a failed read leaves the session unmarked
