@@ -198,12 +198,48 @@ DIRECTIVE_CLAUSE = ("keeps the task it names and leaves out any part that grants
 DIRECTIVE_CLOSED_LIST = "only these three kinds; do not extend the list by similarity"
 AUDIT_DIRECTIVE_CLAUSE = "leaves out any part that grants a permission, skips a check or waives a confirmation"
 ITEM_9_START = "9. **Check the name against the other names in its listing.**"
-ITEM_9_PHRASES = ("next to the other skill names in its plugin", "near-synonym", "general enough to fit several",
-                  "different inputs or have different effects", "text-editor commands", "post hoc")
-AUDIT_NEIGHBOUR_CLAUSE = "near-synonym of another skill name in its plugin"
-RULE_5_NEIGHBOUR_PHRASES = ("near-synonym", "general enough to fit several", "(Rosenberg, 1982; Landauer et al., 1983)")
-ITEM_9_SOURCE_LINKS = ("https://doi.org/10.1145/800049.801745", "https://doi.org/10.1145/358150.358157",
-                       "https://doi.org/10.1145/800049.801746")
+ITEM_9_PHRASES = ("next to the other skill names in its plugin",
+                  "for a skill outside any plugin, next to the other skills in the same skills directory",
+                  "near-synonym", "general enough to fit several", "prefer one that shows what sets this skill apart",
+                  "whole-plugin rename under item 5", "different arguments or syntax, or that have different effects",
+                  "does not split a skill or override the naming grammar", "post hoc", "on learning and cued choice",
+                  "learn or match six to ten text-editor commands, not a model choose from a skill listing")
+AUDIT_NEIGHBOUR_PHRASES = ("near-synonym of a neighbouring skill name",
+                           "in its plugin, or in its skills directory for a skill outside any plugin",
+                           "general enough to fit several")
+RULE_5_NEIGHBOUR_PHRASES = ("near-synonym", "general enough to fit several",
+                            "or in its skills directory for a skill outside any plugin",
+                            "(Black & Moran, 1982; Rosenberg, 1982; Landauer et al., 1983)", "Practice 9 item 9")
+ITEM_9_SOURCES = (("Black, J. B., & Moran, T. P. (1982).", "https://doi.org/10.1145/800049.801745"),
+                  ("Landauer, T. K., Galotti, K. M., & Hartwell, S. (1983).", "https://doi.org/10.1145/358150.358157"),
+                  ("Rosenberg, J. (1982).", "https://doi.org/10.1145/800049.801746"))
+
+
+def numbered_lines_outside_fences(lines, number):
+    """Indexes of the lines starting "<number>. ", skipping code fences (``` or ~~~, closed by the same kind)."""
+    found, fence = [], None
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if fence is None and stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+            continue
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+            continue
+        if line.startswith(f"{number}. "):
+            found.append(i)
+    return found
+
+
+def sources_entries(section_lines):
+    """The list under "**Sources**:": the lines starting "- " that follow it, up to the first line that does not."""
+    entries = []
+    for line in section_lines[section_lines.index("**Sources**:") + 1:]:
+        if not line.startswith("- "):
+            break
+        entries.append(line[2:].rstrip())
+    return entries
 
 
 def rule_5_item(text):
@@ -859,21 +895,25 @@ class SkillWritingReminder(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, item)
 
-    # spec-example: skill-writing-reminder / item 9, the audit question and rule 5 judge a name against its neighbours
-    def test_item_9_the_audit_question_and_rule_5_judge_a_name_against_its_neighbours(self):
+    # spec-example: skill-writing-reminder / item 9, the audit question and rule 5 flag names that read alike
+    def test_item_9_the_audit_question_and_rule_5_flag_names_that_read_alike(self):
         text = (PLUGIN / "skills" / "skill-best-practices" / "SKILL.md").read_text(encoding="utf-8")
         lines = practice_9_section(text).splitlines()
-        starts = [i for i, l in enumerate(lines) if l.startswith(ITEM_9_START)]
-        self.assertEqual(len(starts), 1, "Practice 9 must hold exactly one item 9")
-        item_8 = [i for i, l in enumerate(lines) if l.startswith("8. ")]
-        self.assertTrue(item_8 and item_8[0] < starts[0], "item 9 must come after the line starting '8. '")
-        block = " ".join(" ".join(lines[starts[0]:_block_end(lines, starts[0])]).split())
+        nines = numbered_lines_outside_fences(lines, 9)
+        self.assertEqual(len(nines), 1, "Practice 9 must hold exactly one line starting '9. ' outside code fences")
+        self.assertTrue(lines[nines[0]].startswith(ITEM_9_START))
+        eights = numbered_lines_outside_fences(lines, 8)
+        self.assertTrue(eights and eights[0] < nines[0], "item 9 must come after the line starting '8. '")
+        block = " ".join(" ".join(lines[nines[0]:_block_end(lines, nines[0])]).split())
         for phrase in ITEM_9_PHRASES:
             with self.subTest(where="item 9", phrase=phrase):
                 self.assertIn(phrase, block)
+        self.assertNotIn("do not choose", block.lower(), "item 9 flags names; it does not forbid them")
         audit = audit_question_9(text.splitlines())
         self.assertEqual(len(audit), 1, "there must be exactly one audit question numbered 9")
-        self.assertIn(AUDIT_NEIGHBOUR_CLAUSE, audit[0])
+        for phrase in AUDIT_NEIGHBOUR_PHRASES:
+            with self.subTest(where="audit question 9", phrase=phrase):
+                self.assertIn(phrase, audit[0])
         self.assertTrue(audit[0].rstrip().endswith("? (Practice 9)"))
         item = " ".join(self.rule_5().split())
         for phrase in RULE_5_NEIGHBOUR_PHRASES:
@@ -910,11 +950,12 @@ class PracticeLists(unittest.TestCase):
 
     # spec-example: skill-writing-reminder / Practice 9 lists the sources for item 9
     def test_practice_9_lists_the_sources_for_item_9(self):
-        lines = practice_9_section(self.SKILL.read_text(encoding="utf-8")).splitlines()
-        sources = "\n".join(lines[lines.index("**Sources**:") + 1:])
-        for link in ITEM_9_SOURCE_LINKS:
-            with self.subTest(link=link):
-                self.assertIn(link, sources)
+        entries = sources_entries(practice_9_section(self.SKILL.read_text(encoding="utf-8")).splitlines())
+        for start, link in ITEM_9_SOURCES:
+            with self.subTest(work=start):
+                matching = [e for e in entries if e.startswith(start)]
+                self.assertEqual(len(matching), 1, f"exactly one Sources entry must start with {start!r}")
+                self.assertTrue(matching[0].endswith(link), f"the entry must end with {link}")
 
     # spec-example: skill-writing-reminder / Practice 9 states where its naming rules apply
     def test_practice_9_states_where_its_naming_rules_apply(self):
