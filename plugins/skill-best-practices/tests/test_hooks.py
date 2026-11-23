@@ -209,7 +209,8 @@ AUDIT_NEIGHBOUR_PHRASES = ("near-synonym of a neighbouring skill name",
                            "general enough to fit several")
 RULE_5_NEIGHBOUR_PHRASES = ("near-synonym", "general enough to fit several",
                             "or in its skills directory for a skill outside any plugin",
-                            "(Black & Moran, 1982; Rosenberg, 1982; Landauer et al., 1983)", "Practice 9 item 9")
+                            "general enough to fit several (Black & Moran, 1982; Rosenberg, 1982)",
+                            "only by near-synonyms (Landauer et al., 1983)", "Practice 9 item 9")
 ITEM_9_SOURCES = (("Black, J. B., & Moran, T. P. (1982).", "https://doi.org/10.1145/800049.801745"),
                   ("Landauer, T. K., Galotti, K. M., & Hartwell, S. (1983).", "https://doi.org/10.1145/358150.358157"),
                   ("Rosenberg, J. (1982).", "https://doi.org/10.1145/800049.801746"))
