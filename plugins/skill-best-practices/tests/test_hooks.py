@@ -205,7 +205,7 @@ ITEM_9_PHRASES = ("next to the other skill names in its plugin",
                   "when such a name fits the naming rules that apply to the skill",
                   "if the plugin's skills are renamed, they are renamed together under item 5",
                   "different arguments or syntax, or that have different effects",
-                  "check that the names show the difference rather than differing only by near-synonyms",
+                  "flag names that a reader could confuse with each other",
                   "does not split a skill or override the naming grammar", "post hoc", "on learning and cued choice",
                   "learn or match six to ten text-editor commands, not a model choose from a skill listing")
 AUDIT_NEIGHBOUR_PHRASES = ("read next to the neighbouring skill names",
@@ -995,6 +995,8 @@ class PracticeLists(unittest.TestCase):
                                                               f" https://example.org/https://doi.org/{doi}")
                                                     for e in entries],
             "a second entry for the same work": entries + [f"Black, J., & Moran, T. (1982). Learning. https://doi.org/{doi}"],
+            "a non-breaking space before a DOI URL": [e.replace(f" https://doi.org/{doi}", f"\u00a0https://doi.org/{doi}")
+                                                      for e in entries],
             "a copy of an entry without its DOI": entries + [e.replace(f" https://doi.org/{doi}", "")
                                                            for e in entries if doi in e],
         }
