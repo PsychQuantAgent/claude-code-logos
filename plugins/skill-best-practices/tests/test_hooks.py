@@ -375,6 +375,110 @@ class SkillWritingReminder(unittest.TestCase):
             context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
             self.assertEqual(rule_5_item(context), expected)
 
+    def _two_edits(self, tmp):
+        """Run two Edits of one SKILL.md with session s-1 under TMPDIR=tmp; return both outputs."""
+        import os
+        env = {**os.environ, "TMPDIR": tmp}
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "session_id": "s-1",
+                   "tool_input": {"file_path": "/repo/skills/y/SKILL.md"}}
+        outs = []
+        for _ in range(2):
+            code, out, err = run(self.SCRIPT, payload, env)
+            self.assertEqual(code, 0, err)
+            outs.append(out)
+        return outs
+
+    def _has_rule_5(self, out):
+        self.assertTrue(out.strip(), "expected the reminder")
+        context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        expected = rule_5_item((PLUGIN / "rules" / "skill-writing.md").read_text(encoding="utf-8"))
+        self.assertEqual(rule_5_item(context), expected)
+
+    @staticmethod
+    def _marker_dir_name():
+        import os
+        return f"skill-best-practices-{os.getuid()}"
+
+    # spec-example: skill-writing-reminder / a symlinked marker directory is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_symlinked_marker_directory_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            elsewhere = os.path.join(tmp, "elsewhere")
+            os.mkdir(elsewhere)
+            os.symlink(elsewhere, os.path.join(tmp, self._marker_dir_name()))
+            for out in self._two_edits(tmp):
+                self._has_rule_5(out)
+            self.assertEqual(os.listdir(elsewhere), [])
+
+    # spec-example: skill-writing-reminder / a marker directory open to others is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_marker_directory_open_to_others_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+            os.mkdir(marker_dir)
+            os.chmod(marker_dir, 0o777)
+            for out in self._two_edits(tmp):
+                self._has_rule_5(out)
+            self.assertEqual(os.listdir(marker_dir), [])
+
+    # spec-example: skill-writing-reminder / a regular file in place of the marker directory is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_regular_file_in_place_of_the_marker_directory_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            in_the_way = os.path.join(tmp, self._marker_dir_name())
+            with open(in_the_way, "w", encoding="utf-8") as fh:
+                fh.write("not a directory\n")
+            for out in self._two_edits(tmp):
+                self._has_rule_5(out)
+            with open(in_the_way, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "not a directory\n")
+
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_marker_directory_and_marker_are_private(self):
+        import os
+        import stat
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            first, second = self._two_edits(tmp)
+            self._has_rule_5(first)
+            self.assertEqual(second, "", "a second edit in the session with a trusted directory gets nothing")
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+            self.assertEqual(stat.S_IMODE(os.lstat(marker_dir).st_mode) & 0o077, 0)
+            markers = os.listdir(marker_dir)
+            self.assertEqual(len(markers), 1)
+            self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(marker_dir, markers[0])).st_mode) & 0o077, 0)
+
+    # spec-example: skill-writing-reminder / a failed read leaves the session unmarked
+    def test_failed_read_leaves_the_session_unmarked(self):
+        import os
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as plugin, tempfile.TemporaryDirectory() as tmp:
+            os.mkdir(os.path.join(plugin, "scripts"))
+            copy = os.path.join(plugin, "scripts", self.SCRIPT)
+            shutil.copy(PLUGIN / "scripts" / self.SCRIPT, copy)
+            env = {**os.environ, "TMPDIR": tmp}
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "session_id": "s-1",
+                       "tool_input": {"file_path": "/repo/skills/y/SKILL.md"}}
+            code, first, err = run(copy, payload, env)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(first, "", "a failed read must add no context")
+            os.mkdir(os.path.join(plugin, "rules"))
+            shutil.copy(PLUGIN / "rules" / "skill-writing.md", os.path.join(plugin, "rules", "skill-writing.md"))
+            code, second, err = run(copy, payload, env)
+            self.assertEqual(code, 0, err)
+            self._has_rule_5(second)
+
     # spec-example: skill-writing-reminder / a path that only ends in SKILL.md gets no reminder
     def test_path_that_only_ends_in_skill_md_is_silent(self):
         code, out, err = run(self.SCRIPT, {"hook_event_name": "PreToolUse", "tool_name": "Edit",
