@@ -205,6 +205,7 @@ ITEM_9_PHRASES = ("next to the other skill names in its plugin",
                   "when such a name fits the naming rules that apply to the skill",
                   "if the plugin's skills are renamed, they are renamed together under item 5",
                   "different arguments or syntax, or that have different effects",
+                  "check that the names show the difference rather than differing only by near-synonyms",
                   "does not split a skill or override the naming grammar", "post hoc", "on learning and cued choice",
                   "learn or match six to ten text-editor commands, not a model choose from a skill listing")
 AUDIT_NEIGHBOUR_PHRASES = ("read next to the neighbouring skill names",
@@ -225,6 +226,9 @@ def source_problems(entries):
     that entry starts with the work's author-year, and its last space-separated token is exactly the DOI URL."""
     problems = []
     for start, doi in ITEM_9_SOURCES:
+        starting = [e for e in entries if e.startswith(start)]
+        if len(starting) != 1:
+            problems.append(f"{start!r}: {len(starting)} entries start with it")
         holding = [e for e in entries if doi in e]
         if len(holding) != 1:
             problems.append(f"{doi}: {len(holding)} entries contain it")
@@ -946,9 +950,10 @@ class SkillWritingReminder(unittest.TestCase):
                 self.assertIn(phrase, item)
         self.assertNotIn("Landauer", item, "rule 5 points to item 9 for the different-syntax case")
 
-    # spec-example: skill-writing-reminder / a shorter fence line does not close a longer fence
-    def test_a_shorter_fence_line_does_not_close_a_longer_fence(self):
-        lines = ["````markdown", "```", "9. A quoted item", "```", "````", "9. The real item"]
+    # spec-example: skill-writing-reminder / a fence closes only at its own closing line
+    def test_a_fence_closes_only_at_its_own_closing_line(self):
+        lines = ["````markdown", "```", "9. A quoted item", "````\u00a0", "9. Another quoted item", "````",
+                 "9. The real item"]
         self.assertEqual([lines[i] for i in numbered_lines_outside_fences(lines, 9)], ["9. The real item"])
 
 
@@ -989,6 +994,8 @@ class PracticeLists(unittest.TestCase):
                                                               f" https://example.org/https://doi.org/{doi}")
                                                     for e in entries],
             "a second entry for the same work": entries + [f"Black, J., & Moran, T. (1982). Learning. https://doi.org/{doi}"],
+            "a copy of an entry without its DOI": entries + [e.replace(f" https://doi.org/{doi}", "")
+                                                           for e in entries if doi in e],
         }
         for name, changed in mutations.items():
             with self.subTest(mutation=name):
