@@ -27,7 +27,7 @@ The first change carried the plan's wording over as a rule without checking each
 ## Non-Goals
 
 - Editing the archive of idd-40-practice-9-neighbour-names. Its proposal still says "learning" and states the remembering-and-typing conclusion more broadly. This change records the corrections instead.
-- The fence handling of the existing audit_question_9 helper. That is pre-existing code and is filed separately.
+- The fence handling of the existing audit_question_9 helper. That is pre-existing code and is filed as #43.
 - A version bump. 0.5.0 has not been released.
 
 ## Success Criteria
