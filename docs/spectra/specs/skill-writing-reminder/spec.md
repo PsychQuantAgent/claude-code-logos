@@ -8,7 +8,7 @@ The skill-writing reminder is the guidance the skill-best-practices plugin sends
 
 ### Requirement: The skill-writing reminder states the naming rule
 
-When the PreToolUse hook for Write and Edit receives a path whose final component is exactly SKILL.md, in a session that has not had the reminder yet, the context it adds SHALL contain rule 5 of plugins/skill-best-practices/rules/skill-writing.md, "Names identify, descriptions get found". Rule 5 SHALL say that it summarizes Practice 9 and SHALL point to Practice 9; SHALL name Practice 9 and its source (Furnas et al., 1987); SHALL say that no name can be relied on to be guessed by people unfamiliar with it; SHALL state where each naming rule applies: in a new plugin or one renamed as a whole, the short-name prefix and the shape for each kind of skill, with two content words as the target and three at most; in an existing plugin, that plugin's current names; for a skill outside any plugin, no prefix and a check against built-in commands and bundled skills unless replacing one is the intent; and SHALL say that the description lists several phrasings users actually say, each as a short phrase with no private details, and gains in the same way any wording that failed to reach the skill. As written, rule 5 SHALL contain the prefix, the shapes and the word limit only inside the clause for a new or wholly renamed plugin; the scope check confirms this for the current text, and its mutation table samples edits it reports. The rule 5 item is the whole list item the hook delivers: its first line and every following line that is blank or indented. When the session id is usable and the first call wrote the session marker, a later Write or Edit of a SKILL.md in the same session SHALL add no context; a path whose final component is not exactly SKILL.md SHALL add none.
+When the PreToolUse hook for Write and Edit receives a path whose final component is exactly SKILL.md, in a session that has not had the reminder yet, the context it adds SHALL contain rule 5 of plugins/skill-best-practices/rules/skill-writing.md, "Names identify, descriptions get found". Rule 5 SHALL say that it summarizes Practice 9 and SHALL point to Practice 9; SHALL name Practice 9 and its source (Furnas et al., 1987); SHALL say that no name can be relied on to be guessed by people unfamiliar with it; SHALL state where each naming rule applies: in a new plugin or one renamed as a whole, the short-name prefix and the shape for each kind of skill, with two content words as the target and three at most; in an existing plugin, that plugin's current names; for a skill outside any plugin, no prefix and a check against built-in commands and bundled skills unless replacing one is the intent; and SHALL say that the description lists several phrasings users actually say, each as a short phrase with no private details that keeps the task it names and leaves out any part that grants a permission, skips a check or waives a confirmation, these three kinds only, and gains in the same way any wording that failed to reach the skill. As written, rule 5 SHALL contain the prefix, the shapes and the word limit only inside the clause for a new or wholly renamed plugin; the scope check confirms this for the current text, and its mutation table samples edits it reports. The rule 5 item is the whole list item the hook delivers: its first line and every following line that is blank or indented. When the session id is usable and the first call wrote the session marker, a later Write or Edit of a SKILL.md in the same session SHALL add no context; a path whose final component is not exactly SKILL.md SHALL add none.
 
 #### Scenario: Rule 5 is sent with the reminder
 
@@ -72,13 +72,19 @@ No executable check covers rewordings of the same mandate outside this table: th
 #### Scenario: Descriptions carry the words users say
 
 - **WHEN** the reminder states what a description holds
-- **THEN** the rule 5 item says the description lists several phrasings users actually say, each as a short phrase with no private details, and that a wording which failed to reach the skill is added in the same way
+- **THEN** the rule 5 item says the description lists several phrasings users actually say, each as a short phrase with no private details that keeps its task and leaves out three kinds of directive, and that a wording which failed to reach the skill is added in the same way
 
 ##### Example: a failed wording goes into the description
 
 - **GIVEN** the hook input tool_name Edit and file_path /repo/skills/y/SKILL.md
 - **WHEN** scripts/skill_writing_reminder.py runs and the rule 5 item is taken from additionalContext
 - **THEN** the item contains "The description lists the words users actually say for the job, several phrasings and not one, each as a short phrase with no private details" and "a wording that once failed to reach the skill is added to the description in the same way"
+
+##### Example: collected wordings leave out three kinds of directive
+
+- **GIVEN** the hook input tool_name Edit and file_path /repo/skills/y/SKILL.md
+- **WHEN** scripts/skill_writing_reminder.py runs and the rule 5 item is taken from additionalContext
+- **THEN** the item contains "keeps the task it names and leaves out any part that grants a permission, skips a check or waives a confirmation" and "only these three kinds; do not extend the list by similarity"
 
 #### Scenario: The reminder goes only to a skill file, once per session
 
@@ -100,7 +106,7 @@ No executable check covers rewordings of the same mandate outside this table: th
 ---
 ### Requirement: The plugin lists Practice 9 with its other practices
 
-The plugin's own files SHALL list Practice 9: the skill document SHALL have the heading line "## Practice 9: Names Identify, Descriptions Get Found" and, under its "### When a skill isn't performing" section and outside code fences (``` or ~~~), a question numbered 9 that ends with "? (Practice 9)"; the plugin's CLAUDE.md SHALL have the Practice 9 row as a line of its research table. Practice 9's "How to apply" SHALL state where each naming rule applies before items 1 to 4, and, as written, outside the scope paragraph and the blocks of items 1 to 4 (each item's line and the indented lines that belong to it) no sentence in the Practice 9 section that speaks of every, each, any or all skills, or of skill names, SHALL mention a shape, a prefix or the short name; the Practice 9 scope check confirms this for the current text, and its mutation table samples edits it reports. The repository's files SHALL count nine practices wherever they state a count, as a whole number, SHALL list the Practice 9 research row as a line of the README research table, and the marketplace entry for skill-best-practices SHALL carry the same version as the plugin's plugin.json.
+The plugin's own files SHALL list Practice 9: the skill document SHALL have the heading line "## Practice 9: Names Identify, Descriptions Get Found" and, under its "### When a skill isn't performing" section and outside code fences (``` or ~~~), a question numbered 9 that ends with "? (Practice 9)"; the plugin's CLAUDE.md SHALL have the Practice 9 row as a line of its research table. Practice 9 item 7 and the audit question numbered 9 SHALL each name the three kinds of directive a collected wording leaves out, granting a permission, skipping a check and waiving a confirmation, and item 7 SHALL say these are the only three kinds. Practice 9's "How to apply" SHALL state where each naming rule applies before items 1 to 4, and, as written, outside the scope paragraph and the blocks of items 1 to 4 (each item's line and the indented lines that belong to it) no sentence in the Practice 9 section that speaks of every, each, any or all skills, or of skill names, SHALL mention a shape, a prefix or the short name; the Practice 9 scope check confirms this for the current text, and its mutation table samples edits it reports. The repository's files SHALL count nine practices wherever they state a count, as a whole number, SHALL list the Practice 9 research row as a line of the README research table, and the marketplace entry for skill-best-practices SHALL carry the same version as the plugin's plugin.json.
 
 #### Scenario: The plugin's own files list Practice 9
 
@@ -114,6 +120,17 @@ The plugin's own files SHALL list Practice 9: the skill document SHALL have the 
 | plugins/skill-best-practices/skills/skill-best-practices/SKILL.md | a line that is exactly "## Practice 9: Names Identify, Descriptions Get Found" |
 | plugins/skill-best-practices/skills/skill-best-practices/SKILL.md | under "### When a skill isn't performing", before the next heading and outside code fences (``` or ~~~), a line starting with "9. " and ending with "? (Practice 9)" |
 | plugins/skill-best-practices/CLAUDE.md | a line that is exactly "\| 9 \| Names identify, descriptions get found \| Furnas, Landauer, Gomez, & Dumais (1987) \|", directly below another table line |
+
+#### Scenario: Collected wordings leave out three kinds of directive
+
+- **WHEN** Practice 9 item 7 and the audit question numbered 9 are read
+- **THEN** both name the three kinds of directive a collected wording leaves out, and item 7 says these are the only three kinds
+
+##### Example: item 7 and the audit question name the three kinds
+
+- **GIVEN** plugins/skill-best-practices/skills/skill-best-practices/SKILL.md
+- **WHEN** the block of Practice 9 item 7 (the line starting "7. **The description lists the words users actually say" and the indented lines below it) and the audit question line starting "9. " under "### When a skill isn't performing" are read
+- **THEN** the item 7 block contains "keeps the task it names and leaves out any part that grants a permission, skips a check or waives a confirmation" and "only these three kinds; do not extend the list by similarity", and the audit question contains "leaves out any part that grants a permission, skips a check or waives a confirmation"
 
 #### Scenario: Practice 9 scopes its naming rules
 
