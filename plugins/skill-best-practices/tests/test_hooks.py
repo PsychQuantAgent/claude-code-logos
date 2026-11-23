@@ -568,6 +568,7 @@ class SkillWritingReminder(unittest.TestCase):
         from unittest import mock
         module = self._load_hook()
         attempts = []
+        self.taken_at = []  # clock readings at which the scripted flock really took the lock
         with tempfile.TemporaryDirectory() as tmp:
             tmp = os.path.realpath(tmp)
             marker_dir = os.path.join(tmp, self._marker_dir_name())
@@ -580,7 +581,9 @@ class SkillWritingReminder(unittest.TestCase):
                 attempts.append(clock.now)
                 if answer(len(attempts), clock.now, marker_dir) == "busy":
                     raise BlockingIOError("busy")
-                return fcntl.flock(fd, op)
+                result = fcntl.flock(fd, op)
+                self.taken_at.append(clock.now)
+                return result
 
             fake_fcntl = types.SimpleNamespace(LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB,
                                                LOCK_UN=fcntl.LOCK_UN, flock=flock)
@@ -739,6 +742,7 @@ class SkillWritingReminder(unittest.TestCase):
 
                 code, out, attempts, _ = self._scripted_lock_run(clock, answer)
                 self.assertEqual(code, 0)
+                self.assertEqual(self.taken_at, [taken_at], "the scripted flock must have taken the lock late")
                 self._has_rule_5(out)
                 self.assertTrue(self.lock_free_after, "the late lock must be released")
 
