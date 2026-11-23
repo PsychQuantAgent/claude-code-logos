@@ -239,7 +239,7 @@ def source_problems(entries):
 def numbered_lines_outside_fences(lines, number):
     """Indexes of the lines starting "<number>. " outside code fences. A fence opens at a run of three or more
     backticks or tildes; it closes only at a line made of the same character, at least as long as that run,
-    with nothing but spaces after it."""
+    with nothing but spaces or tabs after it."""
     found, fence = [], None
     for i, line in enumerate(lines):
         if fence is not None:

@@ -2,7 +2,7 @@
 
 ### Requirement: Practice 9 judges a name against the names around it
 
-Practice 9 SHALL have exactly one numbered item 9. Outside code fences, the Practice 9 section SHALL contain exactly one line starting "9. ". That line SHALL start with "9. **Check the name against the other names in its listing.**" and SHALL come after the line starting "8. ". A code fence opens at a line whose first non-space characters are three or more backticks or three or more tildes. It closes only at a line made of the same character, at least as long as that opening run, with nothing but spaces after it. Item 9 SHALL tell the author:
+Practice 9 SHALL have exactly one numbered item 9. Outside code fences, the Practice 9 section SHALL contain exactly one line starting "9. ". That line SHALL start with "9. **Check the name against the other names in its listing.**" and SHALL come after the line starting "8. ". A code fence opens at a line whose first non-space characters are three or more backticks or three or more tildes. It closes only at a line made of the same character, at least as long as that opening run, with nothing but spaces or tabs after it. Item 9 SHALL tell the author:
 - to read a name next to the other skill names in its plugin, or, for a skill outside any plugin, next to the other skills in the same skills directory;
 - to flag a candidate that is a near-synonym of a neighbour, or general enough to fit several of the neighbouring skills;
 - to prefer a name that shows what sets the skill apart, when such a name fits the naming rules that apply to the skill;
