@@ -236,7 +236,7 @@ def source_problems(entries):
             continue
         if not holding[0].startswith(start):
             problems.append(f"{doi}: the entry does not start with {start!r}")
-        if holding[0].split()[-1] != f"https://doi.org/{doi}":
+        if holding[0].rstrip(" ").rsplit(" ", 1)[-1] != f"https://doi.org/{doi}":
             problems.append(f"{doi}: the last token is not https://doi.org/{doi}")
     return problems
 
