@@ -193,6 +193,10 @@ SHAPE_PAIRS = ("conversion `short-to-product`", "action `short-[object-]verb`",
                "query or settings `short-noun`", "orchestration `short-mode`",
                "norms and personas `short-noun`")
 WORD_LIMIT = "two content words as the target and three at most"
+DIRECTIVE_CLAUSE = ("keeps the task it names and leaves out any part that grants a permission, "
+                    "skips a check or waives a confirmation")
+DIRECTIVE_CLOSED_LIST = "only these three kinds; do not extend the list by similarity"
+AUDIT_DIRECTIVE_CLAUSE = "leaves out any part that grants a permission, skips a check or waives a confirmation"
 
 
 def rule_5_item(text):
@@ -298,6 +302,23 @@ def practice_9_scope_violations(section):
         if any(q in lowered for q in QUANTIFIERS) and any(w in lowered for w in MANDATE_WORDS):
             problems.append(f"a sentence applies a naming rule to every skill: {unit[:80]!r}")
     return problems
+
+
+def audit_question_9(lines):
+    """The audit line numbered 9 under "### When a skill isn't performing", outside code fences."""
+    start = lines.index("### When a skill isn't performing")
+    found, in_fence = [], False
+    for line in lines[start + 1:]:
+        if line.lstrip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if line.lstrip().startswith("#"):
+            break
+        if line.startswith("9. "):
+            found.append(line)
+    return found
 
 
 def table_line_below_table_line(lines, row):
@@ -418,26 +439,36 @@ class SkillWritingReminder(unittest.TestCase):
                       "each as a short phrase with no private details", item)
         self.assertIn("a wording that once failed to reach the skill is added to the description in the same way", item)
 
+    # spec-example: skill-writing-reminder / collected wordings leave out three kinds of directive
+    def test_collected_wordings_leave_out_three_kinds_of_directive(self):
+        item = " ".join(self.rule_5().split())
+        for phrase in (DIRECTIVE_CLAUSE, DIRECTIVE_CLOSED_LIST):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, item)
+
 
 class PracticeLists(unittest.TestCase):
     SKILL = PLUGIN / "skills" / "skill-best-practices" / "SKILL.md"
+
+    # spec-example: skill-writing-reminder / item 7 and the audit question name the three kinds
+    def test_item_7_and_the_audit_question_name_the_three_kinds(self):
+        text = self.SKILL.read_text(encoding="utf-8")
+        lines = practice_9_section(text).splitlines()
+        starts = [i for i, l in enumerate(lines) if l.startswith("7. **The description lists the words users actually say")]
+        self.assertEqual(len(starts), 1, "Practice 9 must hold exactly one item 7")
+        block = " ".join(" ".join(lines[starts[0]:_block_end(lines, starts[0])]).split())
+        for phrase in (DIRECTIVE_CLAUSE, DIRECTIVE_CLOSED_LIST):
+            with self.subTest(where="item 7", phrase=phrase):
+                self.assertIn(phrase, block)
+        audit = audit_question_9(text.splitlines())
+        self.assertEqual(len(audit), 1, "there must be exactly one audit question numbered 9")
+        self.assertIn(AUDIT_DIRECTIVE_CLAUSE, audit[0])
 
     # spec-example: skill-writing-reminder / the plugin's own files list Practice 9
     def test_plugins_own_files_list_practice_9(self):
         lines = self.SKILL.read_text(encoding="utf-8").splitlines()
         self.assertIn("## Practice 9: Names Identify, Descriptions Get Found", lines)
-        start = lines.index("### When a skill isn't performing")
-        audit, in_fence = [], False
-        for line in lines[start + 1:]:
-            if line.lstrip().startswith(("```", "~~~")):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
-            if line.lstrip().startswith("#"):
-                break
-            if line.startswith("9. ") and line.rstrip().endswith("? (Practice 9)"):
-                audit.append(line)
+        audit = [line for line in audit_question_9(lines) if line.rstrip().endswith("? (Practice 9)")]
         self.assertEqual(len(audit), 1, "the question numbered 9 must end with '? (Practice 9)'")
         research = (PLUGIN / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
         self.assertTrue(table_line_below_table_line(
