@@ -193,6 +193,10 @@ SHAPE_PAIRS = ("conversion `short-to-product`", "action `short-[object-]verb`",
                "query or settings `short-noun`", "orchestration `short-mode`",
                "norms and personas `short-noun`")
 WORD_LIMIT = "two content words as the target and three at most"
+DIRECTIVE_CLAUSE = ("keeps the task it names and leaves out any part that grants a permission, "
+                    "skips a check or waives a confirmation")
+DIRECTIVE_CLOSED_LIST = "only these three kinds; do not extend the list by similarity"
+AUDIT_DIRECTIVE_CLAUSE = "leaves out any part that grants a permission, skips a check or waives a confirmation"
 
 
 def rule_5_item(text):
@@ -300,6 +304,23 @@ def practice_9_scope_violations(section):
     return problems
 
 
+def audit_question_9(lines):
+    """The audit line numbered 9 under "### When a skill isn't performing", outside code fences."""
+    start = lines.index("### When a skill isn't performing")
+    found, in_fence = [], False
+    for line in lines[start + 1:]:
+        if line.lstrip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if line.lstrip().startswith("#"):
+            break
+        if line.startswith("9. "):
+            found.append(line)
+    return found
+
+
 def table_line_below_table_line(lines, row):
     """The row is a whole line, directly below another table line."""
     return row in lines and lines.index(row) > 0 and lines[lines.index(row) - 1].startswith("|")
@@ -353,6 +374,412 @@ class SkillWritingReminder(unittest.TestCase):
         for out in (first, other):
             context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
             self.assertEqual(rule_5_item(context), expected)
+
+    def _two_edits(self, tmp):
+        """Run two Edits of one SKILL.md with session s-1 under TMPDIR=tmp; return both outputs."""
+        import os
+        env = {**os.environ, "TMPDIR": tmp}
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "session_id": "s-1",
+                   "tool_input": {"file_path": "/repo/skills/y/SKILL.md"}}
+        outs = []
+        for _ in range(2):
+            code, out, err = run(self.SCRIPT, payload, env)
+            self.assertEqual(code, 0, err)
+            outs.append(out)
+        return outs
+
+    def _has_rule_5(self, out):
+        self.assertTrue(out.strip(), "expected the reminder")
+        context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        expected = rule_5_item((PLUGIN / "rules" / "skill-writing.md").read_text(encoding="utf-8"))
+        self.assertEqual(rule_5_item(context), expected)
+
+    @staticmethod
+    def _marker_dir_name():
+        import os
+        return f"skill-best-practices-{os.getuid()}"
+
+    # spec-example: skill-writing-reminder / a symlinked marker directory is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_symlinked_marker_directory_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            elsewhere = os.path.join(tmp, "elsewhere")
+            os.mkdir(elsewhere)
+            os.symlink(elsewhere, os.path.join(tmp, self._marker_dir_name()))
+            for out in self._two_edits(tmp):
+                self._has_rule_5(out)
+            self.assertEqual(os.listdir(elsewhere), [])
+
+    # spec-example: skill-writing-reminder / a marker directory open to others is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_marker_directory_open_to_others_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+            os.mkdir(marker_dir)
+            os.chmod(marker_dir, 0o777)
+            for out in self._two_edits(tmp):
+                self._has_rule_5(out)
+            self.assertEqual(os.listdir(marker_dir), [])
+
+    # spec-example: skill-writing-reminder / a regular file in place of the marker directory is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_regular_file_in_place_of_the_marker_directory_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            in_the_way = os.path.join(tmp, self._marker_dir_name())
+            with open(in_the_way, "w", encoding="utf-8") as fh:
+                fh.write("not a directory\n")
+            for out in self._two_edits(tmp):
+                self._has_rule_5(out)
+            with open(in_the_way, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "not a directory\n")
+
+    # spec-example: skill-writing-reminder / a temp directory open to others without the sticky bit is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_temp_directory_open_to_others_without_sticky_bit_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            os.chmod(tmp, 0o777)
+            try:
+                for out in self._two_edits(tmp):
+                    self._has_rule_5(out)
+                self.assertEqual(os.listdir(tmp), [])
+            finally:
+                os.chmod(tmp, 0o700)
+
+    # spec-example: skill-writing-reminder / a sticky shared temp directory keeps markers
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_sticky_shared_temp_directory_keeps_markers(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            os.chmod(tmp, 0o1777)
+            try:
+                first, second = self._two_edits(tmp)
+            finally:
+                os.chmod(tmp, 0o700)
+            self._has_rule_5(first)
+            self.assertEqual(second, "", "a sticky temp directory must keep the session marker")
+
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_marker_directory_and_marker_are_private(self):
+        import os
+        import stat
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            first, second = self._two_edits(tmp)
+            self._has_rule_5(first)
+            self.assertEqual(second, "", "a second edit in the session with a trusted directory gets nothing")
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+            self.assertEqual(stat.S_IMODE(os.lstat(marker_dir).st_mode) & 0o077, 0)
+            markers = [m for m in os.listdir(marker_dir) if m != ".lock"]
+            self.assertEqual(len(markers), 1)
+            self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(marker_dir, markers[0])).st_mode) & 0o077, 0)
+
+    def _load_hook(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("skill_writing_reminder_under_test", SCRIPTS / self.SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def _run_main(module, payload):
+        import contextlib
+        import io
+        from unittest import mock
+        out = io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))), contextlib.redirect_stdout(out):
+            code = module.main()
+        return code, out.getvalue()
+
+    EDIT_S1 = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "session_id": "s-1",
+               "tool_input": {"file_path": "/repo/skills/y/SKILL.md"}}
+
+    # spec-example: skill-writing-reminder / no temp directory still sends the reminder
+    def test_no_temp_directory_still_sends_the_reminder(self):
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        with mock.patch.object(tempfile, "gettempdir", side_effect=FileNotFoundError("no temp directory")):
+            code, out = self._run_main(module, self.EDIT_S1)
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+
+    # spec-example: skill-writing-reminder / a platform that cannot verify the directory writes no marker
+    def test_platform_that_cannot_verify_writes_no_marker(self):
+        import os
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(tempfile, "tempdir", tmp), \
+                mock.patch.object(module, "_can_verify", return_value=False):
+            for _ in range(2):
+                code, out = self._run_main(module, self.EDIT_S1)
+                self.assertEqual(code, 0)
+                self._has_rule_5(out)
+            self.assertEqual(os.listdir(tmp), [])
+
+    class _Clock:
+        """Stands in for the hook's `time`: advances only when the hook sleeps."""
+
+        def __init__(self, still=False, overshoot=0.0):
+            self.now = 0.0
+            self.slept = 0.0
+            self.sleeps = 0
+            self.still = still
+            self.overshoot = overshoot
+            self.naps = []  # (clock reading, seconds) for each sleep
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.sleeps += 1
+            if self.sleeps > 10000:
+                raise AssertionError("the hook kept waiting")
+            self.slept += seconds
+            self.naps.append((self.now, seconds))
+            if not self.still:
+                self.now += seconds + self.overshoot
+
+    def _scripted_lock_run(self, clock, answer):
+        """Run main() with the scripted clock and a flock that asks answer(attempt, now, take) per attempt.
+
+        answer returns "busy" to refuse the attempt, or calls take() to get the real lock.
+        Returns (exit code, output, the clock reading at each attempt, the marker directory listing).
+        """
+        import fcntl
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+        module = self._load_hook()
+        attempts = []
+        self.taken_at = []  # clock readings at which the scripted flock really took the lock
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+
+            def flock(fd, op):
+                if not op & fcntl.LOCK_EX:
+                    return fcntl.flock(fd, op)
+                if not op & fcntl.LOCK_NB:
+                    raise AssertionError("an exclusive lock attempt without LOCK_NB would block")
+                attempts.append(clock.now)
+                if answer(len(attempts), clock.now, marker_dir) == "busy":
+                    raise BlockingIOError("busy")
+                result = fcntl.flock(fd, op)
+                self.taken_at.append(clock.now)
+                return result
+
+            fake_fcntl = types.SimpleNamespace(LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB,
+                                               LOCK_UN=fcntl.LOCK_UN, flock=flock)
+            with mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(module, "fcntl", fake_fcntl), \
+                    mock.patch.object(module, "time", clock):
+                code, out = self._run_main(module, self.EDIT_S1)
+            listing = sorted(os.listdir(marker_dir)) if os.path.isdir(marker_dir) else None
+            self.lock_free_after = None
+            if listing is not None and ".lock" in listing:
+                probe = os.open(os.path.join(marker_dir, ".lock"), os.O_RDWR)
+                try:
+                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self.lock_free_after = True
+                except BlockingIOError:
+                    self.lock_free_after = False
+                finally:
+                    os.close(probe)
+        return code, out, attempts, listing
+
+    @staticmethod
+    def _mark(marker_dir):
+        import os
+        open(os.path.join(marker_dir, "s-1.skill-writing"), "w").close()
+
+    # spec-example: skill-writing-reminder / the check runs under the session lock
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_check_runs_under_the_session_lock(self):
+        def answer(attempt, now, marker_dir):
+            if attempt < 3:
+                return "busy"
+            self._mark(marker_dir)
+            return "take"
+
+        code, out, attempts, _ = self._scripted_lock_run(self._Clock(still=True), answer)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(attempts), 3, "the hook must keep trying while the lock is busy")
+        self.assertEqual(out, "", "the marker check must see the marker that appeared before the lock was taken")
+
+    # spec-example: skill-writing-reminder / the print and the marker write happen under the lock
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_print_and_marker_write_happen_under_the_lock(self):
+        import fcntl
+        import os
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        real_open, real_print = os.open, module._print_context
+        seen = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            lock_path = os.path.join(tmp, self._marker_dir_name(), ".lock")
+
+            def lock_is_held():
+                try:
+                    fd = real_open(lock_path, os.O_RDWR)
+                except FileNotFoundError:
+                    return False  # no lock file: the hook took no lock
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return True
+                finally:
+                    os.close(fd)  # closing also drops a lock taken here
+                return False
+
+            events = []
+
+            def watched_print(rule):
+                events.append("print")
+                seen["print"] = lock_is_held()
+                return real_print(rule)
+
+            def watched_open(path, flags, *args, **kwargs):
+                fd = real_open(path, flags, *args, **kwargs)
+                if isinstance(path, str) and os.path.basename(path) == "s-1.skill-writing" and flags & os.O_CREAT:
+                    events.append("marker")  # the creation succeeded
+                    seen["marker"] = lock_is_held()
+                return fd
+
+            # A mocked os.open is not in os.supports_dir_fd, so the platform check is held at its real answer here.
+            with mock.patch.object(tempfile, "tempdir", tmp), \
+                    mock.patch.object(module, "_can_verify", return_value=module._can_verify()), \
+                    mock.patch.object(module, "_print_context", side_effect=watched_print), \
+                    mock.patch.object(module.os, "open", side_effect=watched_open):
+                code, out = self._run_main(module, self.EDIT_S1)
+            marker_exists = os.path.isfile(os.path.join(tmp, self._marker_dir_name(), "s-1.skill-writing"))
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertEqual(events, ["print", "marker"], "the hook prints, then creates the session's marker")
+        self.assertEqual(seen, {"print": True, "marker": True})
+        self.assertTrue(marker_exists, "s-1.skill-writing must exist after the run")
+
+    # spec-example: skill-writing-reminder / who may own the temp directory
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_who_may_own_the_temp_directory(self):
+        import os
+        import stat
+        module = self._load_hook()
+        me = os.getuid()
+        rows = [  # (owner, mode, trusted)
+            (me, 0o700, True),
+            (0, 0o1777, True),
+            (me + 1, 0o700, False),
+            (me + 1, 0o1777, False),
+            (me, 0o777, False),
+            (me, 0o1777, True),
+        ]
+        for owner, mode, trusted in rows:
+            with self.subTest(owner=owner, mode=oct(mode)):
+                info = os.stat_result((stat.S_IFDIR | mode, 0, 0, 2, owner, 0, 0, 0, 0, 0))
+                self.assertIs(module._temp_dir_trusted(info), trusted)
+
+    # spec-example: skill-writing-reminder / a lock held too long still sends the reminder
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_held_too_long_still_sends_the_reminder(self):
+        clock = self._Clock()
+        code, out, attempts, listing = self._scripted_lock_run(clock, lambda attempt, now, d: "busy")
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertGreater(len(attempts), 1, "the hook must retry before it gives up")
+        self.assertEqual([t for t in attempts if t >= 5.0], [], "an attempt started at or after the deadline")
+        self.assertAlmostEqual(clock.slept, 5.0, places=6)
+        long_naps = [(t, d) for t, d in clock.naps if d > 5.0 - t + 1e-9]
+        self.assertEqual(long_naps, [], "no sleep may be longer than the time left")
+        self.assertEqual(listing, [".lock"])
+
+    # spec-example: skill-writing-reminder / a lock freed after the deadline is not taken
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_freed_after_the_deadline_is_not_taken(self):
+        def answer(attempt, now, marker_dir):
+            if now < 5.0:
+                return "busy"
+            self._mark(marker_dir)
+            return "take"
+
+        code, out, attempts, listing = self._scripted_lock_run(self._Clock(overshoot=0.03), answer)
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertTrue(attempts and all(t < 5.0 for t in attempts),
+                        f"an attempt started after the deadline: {[t for t in attempts if t >= 5.0]}")
+        self.assertEqual(listing, [".lock"])
+
+    # spec-example: skill-writing-reminder / a lock taken after the deadline is let go
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_taken_after_the_deadline_is_let_go(self):
+        for taken_at in (5.0, 5.1):
+            with self.subTest(taken_at=taken_at):
+                clock = self._Clock()
+
+                def answer(attempt, now, marker_dir):
+                    if now < 4.9:
+                        return "busy"
+                    clock.now = taken_at  # descheduled inside flock until the deadline or past it
+                    self._mark(marker_dir)
+                    return "take"
+
+                code, out, attempts, _ = self._scripted_lock_run(clock, answer)
+                self.assertEqual(code, 0)
+                self.assertEqual(self.taken_at, [taken_at], "the scripted flock must have taken the lock late")
+                self._has_rule_5(out)
+                self.assertTrue(self.lock_free_after, "the late lock must be released")
+
+    # spec-example: skill-writing-reminder / a lock error other than busy sends the reminder at once
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_error_other_than_busy_sends_the_reminder_at_once(self):
+        import errno
+
+        def answer(attempt, now, marker_dir):
+            raise OSError(errno.ENOLCK, "no locks available")
+
+        code, out, attempts, listing = self._scripted_lock_run(self._Clock(), answer)
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(listing, [".lock"])
+
+    # spec-example: skill-writing-reminder / a failed read leaves the session unmarked
+    def test_failed_read_leaves_the_session_unmarked(self):
+        import os
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as plugin, tempfile.TemporaryDirectory() as tmp:
+            os.mkdir(os.path.join(plugin, "scripts"))
+            copy = os.path.join(plugin, "scripts", self.SCRIPT)
+            shutil.copy(PLUGIN / "scripts" / self.SCRIPT, copy)
+            env = {**os.environ, "TMPDIR": tmp}
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "session_id": "s-1",
+                       "tool_input": {"file_path": "/repo/skills/y/SKILL.md"}}
+            code, first, err = run(copy, payload, env)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(first, "", "a failed read must add no context")
+            os.mkdir(os.path.join(plugin, "rules"))
+            shutil.copy(PLUGIN / "rules" / "skill-writing.md", os.path.join(plugin, "rules", "skill-writing.md"))
+            code, second, err = run(copy, payload, env)
+            self.assertEqual(code, 0, err)
+            self._has_rule_5(second)
 
     # spec-example: skill-writing-reminder / a path that only ends in SKILL.md gets no reminder
     def test_path_that_only_ends_in_skill_md_is_silent(self):
@@ -418,26 +845,36 @@ class SkillWritingReminder(unittest.TestCase):
                       "each as a short phrase with no private details", item)
         self.assertIn("a wording that once failed to reach the skill is added to the description in the same way", item)
 
+    # spec-example: skill-writing-reminder / collected wordings leave out three kinds of directive
+    def test_collected_wordings_leave_out_three_kinds_of_directive(self):
+        item = " ".join(self.rule_5().split())
+        for phrase in (DIRECTIVE_CLAUSE, DIRECTIVE_CLOSED_LIST):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, item)
+
 
 class PracticeLists(unittest.TestCase):
     SKILL = PLUGIN / "skills" / "skill-best-practices" / "SKILL.md"
+
+    # spec-example: skill-writing-reminder / item 7 and the audit question name the three kinds
+    def test_item_7_and_the_audit_question_name_the_three_kinds(self):
+        text = self.SKILL.read_text(encoding="utf-8")
+        lines = practice_9_section(text).splitlines()
+        starts = [i for i, l in enumerate(lines) if l.startswith("7. **The description lists the words users actually say")]
+        self.assertEqual(len(starts), 1, "Practice 9 must hold exactly one item 7")
+        block = " ".join(" ".join(lines[starts[0]:_block_end(lines, starts[0])]).split())
+        for phrase in (DIRECTIVE_CLAUSE, DIRECTIVE_CLOSED_LIST):
+            with self.subTest(where="item 7", phrase=phrase):
+                self.assertIn(phrase, block)
+        audit = audit_question_9(text.splitlines())
+        self.assertEqual(len(audit), 1, "there must be exactly one audit question numbered 9")
+        self.assertIn(AUDIT_DIRECTIVE_CLAUSE, audit[0])
 
     # spec-example: skill-writing-reminder / the plugin's own files list Practice 9
     def test_plugins_own_files_list_practice_9(self):
         lines = self.SKILL.read_text(encoding="utf-8").splitlines()
         self.assertIn("## Practice 9: Names Identify, Descriptions Get Found", lines)
-        start = lines.index("### When a skill isn't performing")
-        audit, in_fence = [], False
-        for line in lines[start + 1:]:
-            if line.lstrip().startswith(("```", "~~~")):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
-            if line.lstrip().startswith("#"):
-                break
-            if line.startswith("9. ") and line.rstrip().endswith("? (Practice 9)"):
-                audit.append(line)
+        audit = [line for line in audit_question_9(lines) if line.rstrip().endswith("? (Practice 9)")]
         self.assertEqual(len(audit), 1, "the question numbered 9 must end with '? (Practice 9)'")
         research = (PLUGIN / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
         self.assertTrue(table_line_below_table_line(
