@@ -8,10 +8,14 @@ text is added as context, once per session.
 The session marker lives in a directory private to the user under the system
 temp directory. The hook keeps markers only where it can verify that directory
 through an open descriptor (a user id, descriptor-relative file calls,
-O_DIRECTORY, O_NOFOLLOW and fcntl); everywhere else, and whenever a check
-fails, it sends the reminder and writes no marker. The marker check, the print
-and the marker write run under a lock, and the marker is written only after
-the context has been printed. Never decides the call.
+O_DIRECTORY, O_NOFOLLOW and fcntl), and only when the temp directory itself is
+owned by the user or root and is either closed to writes by others or sticky,
+so nobody else can rename the private directory. Everywhere else, and whenever
+a check fails, it sends the reminder and writes no marker. The marker check,
+the print and the marker write run under a lock; no lock attempt starts after
+the wait has run out, and the marker is written only after the context has
+been printed. Owners and permission bits are checked; ACLs are not. Never
+decides the call.
 """
 import json
 import os
@@ -25,6 +29,7 @@ import time
 RULE_FILE = pathlib.Path(__file__).resolve().parents[1] / "rules" / "skill-writing.md"
 LOCK_NAME = ".lock"
 LOCK_WAIT_SECONDS = 5
+LOCK_RETRY_SECONDS = 0.05
 
 try:
     import fcntl
@@ -44,12 +49,19 @@ def _can_verify():
             and os.mkdir in os.supports_dir_fd and os.stat in os.supports_follow_symlinks)
 
 
+def _temp_dir_trusted(info):
+    """Whether nobody but the user or root can rename entries in the temp directory."""
+    return (stat.S_ISDIR(info.st_mode) and info.st_uid in (os.getuid(), 0)
+            and (not info.st_mode & 0o022 or bool(info.st_mode & stat.S_ISVTX)))
+
+
 def _open_marker_dir():
     """An open descriptor of the user's private marker directory, or None when it cannot be trusted.
 
-    Trusted means: opened relative to the temp directory without following a
-    symlink, and fstat on the open directory shows a directory owned by the
-    current user with no permission bits for group or others.
+    Trusted means: the open temp directory passes _temp_dir_trusted, and the
+    marker directory, opened relative to it without following a symlink, shows
+    in fstat a directory owned by the current user with no permission bits for
+    group or others.
     """
     if not _can_verify():
         return None
@@ -60,6 +72,8 @@ def _open_marker_dir():
         return None
     name = f"skill-best-practices-{os.getuid()}"
     try:
+        if not _temp_dir_trusted(os.fstat(parent_fd)):
+            return None
         try:
             os.mkdir(name, 0o700, dir_fd=parent_fd)
         except FileExistsError:
@@ -93,11 +107,15 @@ def _lock(dir_fd):
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return lock_fd
         except BlockingIOError:
-            if time.monotonic() >= deadline:
-                break
-            time.sleep(0.05)
+            pass
         except OSError:
             break
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        time.sleep(min(LOCK_RETRY_SECONDS, left))
+        if time.monotonic() >= deadline:
+            break  # no attempt starts after the deadline
     os.close(lock_fd)
     return None
 

@@ -442,6 +442,36 @@ class SkillWritingReminder(unittest.TestCase):
             with open(in_the_way, encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), "not a directory\n")
 
+    # spec-example: skill-writing-reminder / a temp directory open to others without the sticky bit is refused
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_temp_directory_open_to_others_without_sticky_bit_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            os.chmod(tmp, 0o777)
+            try:
+                for out in self._two_edits(tmp):
+                    self._has_rule_5(out)
+                self.assertEqual(os.listdir(tmp), [])
+            finally:
+                os.chmod(tmp, 0o700)
+
+    # spec-example: skill-writing-reminder / a sticky shared temp directory keeps markers
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_sticky_shared_temp_directory_keeps_markers(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            os.chmod(tmp, 0o1777)
+            try:
+                first, second = self._two_edits(tmp)
+            finally:
+                os.chmod(tmp, 0o700)
+            self._has_rule_5(first)
+            self.assertEqual(second, "", "a sticky temp directory must keep the session marker")
+
     @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
     def test_marker_directory_and_marker_are_private(self):
         import os
@@ -502,86 +532,105 @@ class SkillWritingReminder(unittest.TestCase):
                 self._has_rule_5(out)
             self.assertEqual(os.listdir(tmp), [])
 
+    class _Clock:
+        """Stands in for the hook's `time`: advances only when the hook sleeps."""
+
+        def __init__(self, still=False, overshoot=0.0):
+            self.now = 0.0
+            self.slept = 0.0
+            self.sleeps = 0
+            self.still = still
+            self.overshoot = overshoot
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.sleeps += 1
+            if self.sleeps > 10000:
+                raise AssertionError("the hook kept waiting")
+            self.slept += seconds
+            if not self.still:
+                self.now += seconds + self.overshoot
+
+    def _scripted_lock_run(self, clock, answer):
+        """Run main() with the scripted clock and a flock that asks answer(attempt, now, take) per attempt.
+
+        answer returns "busy" to refuse the attempt, or calls take() to get the real lock.
+        Returns (exit code, output, the clock reading at each attempt, the marker directory listing).
+        """
+        import fcntl
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+        module = self._load_hook()
+        attempts = []
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+
+            def flock(fd, op):
+                if not op & fcntl.LOCK_EX:
+                    return fcntl.flock(fd, op)
+                attempts.append(clock.now)
+                if answer(len(attempts), clock.now, marker_dir) == "busy":
+                    raise BlockingIOError("busy")
+                return fcntl.flock(fd, op)
+
+            fake_fcntl = types.SimpleNamespace(LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB,
+                                               LOCK_UN=fcntl.LOCK_UN, flock=flock)
+            with mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(module, "fcntl", fake_fcntl), \
+                    mock.patch.object(module, "time", clock):
+                code, out = self._run_main(module, self.EDIT_S1)
+            listing = sorted(os.listdir(marker_dir)) if os.path.isdir(marker_dir) else None
+        return code, out, attempts, listing
+
+    @staticmethod
+    def _mark(marker_dir):
+        import os
+        open(os.path.join(marker_dir, "s-1.skill-writing"), "w").close()
+
     # spec-example: skill-writing-reminder / the check runs under the session lock
     @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
     def test_check_runs_under_the_session_lock(self):
-        import fcntl
-        import os
-        import subprocess
-        import tempfile
-        import time
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = os.path.realpath(tmp)
-            marker_dir = os.path.join(tmp, self._marker_dir_name())
-            os.mkdir(marker_dir, 0o700)
-            os.chmod(marker_dir, 0o700)
-            lock = os.open(os.path.join(marker_dir, ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            proc = subprocess.Popen(["python3", str(SCRIPTS / self.SCRIPT)], stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                    env={**os.environ, "TMPDIR": tmp})
-            try:
-                proc.stdin.write(json.dumps(self.EDIT_S1))
-                proc.stdin.close()
-                proc.stdin = None  # communicate() must not touch the closed pipe
-                time.sleep(1.0)
-                still_running = proc.poll() is None
-                open(os.path.join(marker_dir, "s-1.skill-writing"), "w").close()
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
-                os.close(lock)
-            out, err = proc.communicate(timeout=15)
-            self.assertTrue(still_running, "the hook must wait while another call holds the lock")
-            self.assertEqual(proc.returncode, 0, err)
-            self.assertEqual(out, "")
+        def answer(attempt, now, marker_dir):
+            if attempt < 3:
+                return "busy"
+            self._mark(marker_dir)
+            return "take"
 
-    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
-    def test_marker_check_comes_after_the_lock(self):
-        """Deterministic companion of the lock Example: the marker appears while the hook takes the lock."""
-        import os
-        import tempfile
-        from unittest import mock
-        module = self._load_hook()
-        real_flock = module.fcntl.flock
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = os.path.realpath(tmp)
-            marker_dir = os.path.join(tmp, self._marker_dir_name())
-
-            def flock_then_mark(fd, op):
-                real_flock(fd, op)
-                if op & module.fcntl.LOCK_EX:
-                    open(os.path.join(marker_dir, "s-1.skill-writing"), "w").close()
-
-            with mock.patch.object(tempfile, "tempdir", tmp), \
-                    mock.patch.object(module.fcntl, "flock", side_effect=flock_then_mark):
-                code, out = self._run_main(module, self.EDIT_S1)
+        code, out, attempts, _ = self._scripted_lock_run(self._Clock(still=True), answer)
         self.assertEqual(code, 0)
-        self.assertEqual(out, "", "the marker check must run after the lock is taken")
+        self.assertEqual(len(attempts), 3, "the hook must keep trying while the lock is busy")
+        self.assertEqual(out, "", "the marker check must see the marker that appeared before the lock was taken")
 
     # spec-example: skill-writing-reminder / a lock held too long still sends the reminder
     @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
     def test_lock_held_too_long_still_sends_the_reminder(self):
-        import fcntl
-        import os
-        import tempfile
-        from unittest import mock
-        module = self._load_hook()
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = os.path.realpath(tmp)
-            marker_dir = os.path.join(tmp, self._marker_dir_name())
-            os.mkdir(marker_dir, 0o700)
-            os.chmod(marker_dir, 0o700)
-            lock = os.open(os.path.join(marker_dir, ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                with mock.patch.object(tempfile, "tempdir", tmp), \
-                        mock.patch.object(module, "LOCK_WAIT_SECONDS", 0.2):
-                    code, out = self._run_main(module, self.EDIT_S1)
-            finally:
-                os.close(lock)
-            self.assertEqual(code, 0)
-            self._has_rule_5(out)
-            self.assertEqual(sorted(os.listdir(marker_dir)), [".lock"])
+        clock = self._Clock()
+        code, out, attempts, listing = self._scripted_lock_run(clock, lambda attempt, now, d: "busy")
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertGreater(len(attempts), 1, "the hook must retry before it gives up")
+        self.assertAlmostEqual(clock.slept, 5.0, places=6)
+        self.assertEqual(listing, [".lock"])
+
+    # spec-example: skill-writing-reminder / a lock freed after the deadline is not taken
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_freed_after_the_deadline_is_not_taken(self):
+        def answer(attempt, now, marker_dir):
+            if now < 5.0:
+                return "busy"
+            self._mark(marker_dir)
+            return "take"
+
+        code, out, attempts, listing = self._scripted_lock_run(self._Clock(overshoot=0.03), answer)
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+        self.assertTrue(attempts and all(t < 5.0 for t in attempts),
+                        f"an attempt started after the deadline: {[t for t in attempts if t >= 5.0]}")
+        self.assertEqual(listing, [".lock"])
 
     # spec-example: skill-writing-reminder / a failed read leaves the session unmarked
     def test_failed_read_leaves_the_session_unmarked(self):
