@@ -237,16 +237,20 @@ def source_problems(entries):
 
 
 def numbered_lines_outside_fences(lines, number):
-    """Indexes of the lines starting "<number>. ", skipping code fences (``` or ~~~, closed by the same kind)."""
+    """Indexes of the lines starting "<number>. " outside code fences. A fence opens at a run of three or more
+    backticks or tildes; it closes only at a line made of the same character, at least as long as that run,
+    with nothing but spaces after it."""
     found, fence = [], None
     for i, line in enumerate(lines):
-        stripped = line.lstrip()
-        if fence is None and stripped.startswith(("```", "~~~")):
-            fence = stripped[:3]
-            continue
         if fence is not None:
-            if stripped.startswith(fence):
+            run = line.strip()
+            if run and set(run) == {fence[0]} and len(run) >= len(fence):
                 fence = None
+            continue
+        lead = line.lstrip()
+        mark = lead[:1]
+        if mark in ("`", "~") and len(lead) - len(lead.lstrip(mark)) >= 3:
+            fence = mark * (len(lead) - len(lead.lstrip(mark)))
             continue
         if line.startswith(f"{number}. "):
             found.append(i)
