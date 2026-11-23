@@ -247,7 +247,7 @@ def numbered_lines_outside_fences(lines, number):
     found, fence = [], None
     for i, line in enumerate(lines):
         if fence is not None:
-            run = line.strip()
+            run = line.strip(" \t")
             if run and set(run) == {fence[0]} and len(run) >= len(fence):
                 fence = None
             continue
