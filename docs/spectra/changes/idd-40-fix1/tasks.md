@@ -18,8 +18,8 @@
 
 ## 3. Source check
 
-- [ ] 3.1 For the requirement "Practice 9 reports its source faithfully": each claim in the rewritten research paragraph and item 9 is compared with the cited page, and the record is posted on PsychQuantAgent/claude-code-logos#40. Verified by that comment listing each changed claim with its page and the result.
+- [x] 3.1 For the requirement "Practice 9 reports its source faithfully": each claim in the rewritten research paragraph and item 9 is compared with the cited page, and the record is posted on PsychQuantAgent/claude-code-logos#40. Verified by that comment listing each changed claim with its page and the result.
 
 ## 4. Whole suite
 
-- [ ] 4.1 Both suites pass: python3 -m pytest -q plugins/skill-best-practices/tests tests reports no failure.
+- [x] 4.1 Both suites pass: python3 -m pytest -q plugins/skill-best-practices/tests tests reports no failure.
