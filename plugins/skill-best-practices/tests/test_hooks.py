@@ -197,6 +197,80 @@ DIRECTIVE_CLAUSE = ("keeps the task it names and leaves out any part that grants
                     "skips a check or waives a confirmation")
 DIRECTIVE_CLOSED_LIST = "only these three kinds; do not extend the list by similarity"
 AUDIT_DIRECTIVE_CLAUSE = "leaves out any part that grants a permission, skips a check or waives a confirmation"
+ITEM_9_START = "9. **Check the name against the other names in its listing.**"
+ITEM_9_PHRASES = ("next to the other skill names in its plugin",
+                  "for a skill outside any plugin, next to the other skills in the same skills directory",
+                  "Flag a candidate that is a near-synonym", "general enough to fit several",
+                  "prefer one that shows what sets this skill apart",
+                  "when such a name fits the naming rules that apply to the skill",
+                  "if the plugin's skills are renamed, they are renamed together under item 5",
+                  "different arguments or syntax, or that have different effects",
+                  "flag names that a reader could confuse with each other",
+                  "prefer one that makes the difference clear where the naming rules allow",
+                  "does not split a skill or override the naming grammar", "post hoc", "on learning and cued choice",
+                  "learn or match six to ten text-editor commands, not a model choose from a skill listing")
+AUDIT_NEIGHBOUR_PHRASES = ("read next to the neighbouring skill names",
+                           "in its plugin, or in its skills directory for a skill outside any plugin",
+                           "flagged if it is a near-synonym of one of them or general enough to fit several")
+RULE_5_NEIGHBOUR_PHRASES = ("Read the name next to the other skill names in its plugin",
+                            "or in its skills directory for a skill outside any plugin",
+                            "flag one that is a near-synonym of a neighbour",
+                            "general enough to fit several (Black & Moran, 1982; Rosenberg, 1982)",
+                            "Practice 9 item 9")
+ITEM_9_SOURCES = (("Black, J. B., & Moran, T. P. (1982).", "10.1145/800049.801745"),
+                  ("Landauer, T. K., Galotti, K. M., & Hartwell, S. (1983).", "10.1145/358150.358157"),
+                  ("Rosenberg, J. (1982).", "10.1145/800049.801746"))
+
+
+def source_problems(entries):
+    """What the Sources list gets wrong for item 9's works: for each work, exactly one entry starts with its
+    author-year and exactly one entry contains its DOI; that entry starts with the author-year, and its last
+    space-separated token is exactly the DOI URL."""
+    problems = []
+    for start, doi in ITEM_9_SOURCES:
+        starting = [e for e in entries if e.startswith(start)]
+        if len(starting) != 1:
+            problems.append(f"{start!r}: {len(starting)} entries start with it")
+        holding = [e for e in entries if doi in e]
+        if len(holding) != 1:
+            problems.append(f"{doi}: {len(holding)} entries contain it")
+            continue
+        if not holding[0].startswith(start):
+            problems.append(f"{doi}: the entry does not start with {start!r}")
+        if holding[0].rstrip(" ").rsplit(" ", 1)[-1] != f"https://doi.org/{doi}":
+            problems.append(f"{doi}: the last token is not https://doi.org/{doi}")
+    return problems
+
+
+def numbered_lines_outside_fences(lines, number):
+    """Indexes of the lines starting "<number>. " outside code fences. A fence opens at a run of three or more
+    backticks or tildes after any spaces or tabs; it closes only at a line made of the same character, at least
+    as long as that run, with nothing but spaces or tabs before or after it."""
+    found, fence = [], None
+    for i, line in enumerate(lines):
+        if fence is not None:
+            run = line.strip(" \t")
+            if run and set(run) == {fence[0]} and len(run) >= len(fence):
+                fence = None
+            continue
+        lead = line.lstrip(" \t")
+        mark = lead[:1]
+        if mark in ("`", "~") and len(lead) - len(lead.lstrip(mark)) >= 3:
+            fence = mark * (len(lead) - len(lead.lstrip(mark)))
+            continue
+        if line.startswith(f"{number}. "):
+            found.append(i)
+    return found
+
+
+def sources_entries(section_lines):
+    """The list under "**Sources**:": the lines starting "- " that follow it, up to the first line that does not."""
+    entries = []
+    for line in section_lines[section_lines.index("**Sources**:") + 1:]:
+        if not line.startswith("- "):
+            break
+        entries.append(line[2:].rstrip(" "))
+    return entries
 
 
 def rule_5_item(text):
@@ -852,6 +926,38 @@ class SkillWritingReminder(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, item)
 
+    # spec-example: skill-writing-reminder / item 9, the audit question and rule 5 flag names that read alike
+    def test_item_9_the_audit_question_and_rule_5_flag_names_that_read_alike(self):
+        text = (PLUGIN / "skills" / "skill-best-practices" / "SKILL.md").read_text(encoding="utf-8")
+        lines = practice_9_section(text).splitlines()
+        nines = numbered_lines_outside_fences(lines, 9)
+        self.assertEqual(len(nines), 1, "Practice 9 must hold exactly one line starting '9. ' outside code fences")
+        self.assertTrue(lines[nines[0]].startswith(ITEM_9_START))
+        eights = numbered_lines_outside_fences(lines, 8)
+        self.assertTrue(eights and eights[0] < nines[0], "item 9 must come after the line starting '8. '")
+        block = " ".join(" ".join(lines[nines[0]:_block_end(lines, nines[0])]).split())
+        for phrase in ITEM_9_PHRASES:
+            with self.subTest(where="item 9", phrase=phrase):
+                self.assertIn(phrase, block)
+        self.assertNotIn("do not choose", block.lower(), "item 9 flags names; it does not forbid them")
+        audit = audit_question_9(text.splitlines())
+        self.assertEqual(len(audit), 1, "there must be exactly one audit question numbered 9")
+        for phrase in AUDIT_NEIGHBOUR_PHRASES:
+            with self.subTest(where="audit question 9", phrase=phrase):
+                self.assertIn(phrase, audit[0])
+        self.assertTrue(audit[0].rstrip().endswith("? (Practice 9)"))
+        item = " ".join(self.rule_5().split())
+        for phrase in RULE_5_NEIGHBOUR_PHRASES:
+            with self.subTest(where="rule 5", phrase=phrase):
+                self.assertIn(phrase, item)
+        self.assertNotIn("Landauer", item, "rule 5 points to item 9 for the different-syntax case")
+
+    # spec-example: skill-writing-reminder / a fence closes only at its own closing line
+    def test_a_fence_closes_only_at_its_own_closing_line(self):
+        lines = ["````markdown", "```", "9. A quoted item", "````\u00a0", "9. Another quoted item", "````",
+                 "9. The real item"]
+        self.assertEqual([lines[i] for i in numbered_lines_outside_fences(lines, 9)], ["9. The real item"])
+
 
 class PracticeLists(unittest.TestCase):
     SKILL = PLUGIN / "skills" / "skill-best-practices" / "SKILL.md"
@@ -879,6 +985,27 @@ class PracticeLists(unittest.TestCase):
         research = (PLUGIN / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
         self.assertTrue(table_line_below_table_line(
             research, "| 9 | Names identify, descriptions get found | Furnas, Landauer, Gomez, & Dumais (1987) |"))
+
+    # spec-example: skill-writing-reminder / Practice 9 lists the sources for item 9
+    def test_practice_9_lists_the_sources_for_item_9(self):
+        entries = sources_entries(practice_9_section(self.SKILL.read_text(encoding="utf-8")).splitlines())
+        self.assertEqual(source_problems(entries), [])
+        doi = ITEM_9_SOURCES[0][1]
+        mutations = {
+            "a URL that only ends with the DOI URL": [e.replace(f" https://doi.org/{doi}",
+                                                              f" https://example.org/https://doi.org/{doi}")
+                                                    for e in entries],
+            "a second entry for the same work": entries + [f"Black, J., & Moran, T. (1982). Learning. https://doi.org/{doi}"],
+            "a non-breaking space before a DOI URL": [e.replace(f" https://doi.org/{doi}", f"\u00a0https://doi.org/{doi}")
+                                                      for e in entries],
+            "a non-breaking space after a DOI URL": [e.replace(f" https://doi.org/{doi}", f" https://doi.org/{doi}\u00a0")
+                                                     for e in entries],
+            "a copy of an entry without its DOI": entries + [e.replace(f" https://doi.org/{doi}", "")
+                                                           for e in entries if doi in e],
+        }
+        for name, changed in mutations.items():
+            with self.subTest(mutation=name):
+                self.assertNotEqual(source_problems(changed), [])
 
     # spec-example: skill-writing-reminder / Practice 9 states where its naming rules apply
     def test_practice_9_states_where_its_naming_rules_apply(self):
