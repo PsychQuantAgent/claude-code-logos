@@ -454,9 +454,134 @@ class SkillWritingReminder(unittest.TestCase):
             self.assertEqual(second, "", "a second edit in the session with a trusted directory gets nothing")
             marker_dir = os.path.join(tmp, self._marker_dir_name())
             self.assertEqual(stat.S_IMODE(os.lstat(marker_dir).st_mode) & 0o077, 0)
-            markers = os.listdir(marker_dir)
+            markers = [m for m in os.listdir(marker_dir) if m != ".lock"]
             self.assertEqual(len(markers), 1)
             self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(marker_dir, markers[0])).st_mode) & 0o077, 0)
+
+    def _load_hook(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("skill_writing_reminder_under_test", SCRIPTS / self.SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def _run_main(module, payload):
+        import contextlib
+        import io
+        from unittest import mock
+        out = io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))), contextlib.redirect_stdout(out):
+            code = module.main()
+        return code, out.getvalue()
+
+    EDIT_S1 = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "session_id": "s-1",
+               "tool_input": {"file_path": "/repo/skills/y/SKILL.md"}}
+
+    # spec-example: skill-writing-reminder / no temp directory still sends the reminder
+    def test_no_temp_directory_still_sends_the_reminder(self):
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        with mock.patch.object(tempfile, "gettempdir", side_effect=FileNotFoundError("no temp directory")):
+            code, out = self._run_main(module, self.EDIT_S1)
+        self.assertEqual(code, 0)
+        self._has_rule_5(out)
+
+    # spec-example: skill-writing-reminder / a platform that cannot verify the directory writes no marker
+    def test_platform_that_cannot_verify_writes_no_marker(self):
+        import os
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(tempfile, "tempdir", tmp), \
+                mock.patch.object(module, "_can_verify", return_value=False):
+            for _ in range(2):
+                code, out = self._run_main(module, self.EDIT_S1)
+                self.assertEqual(code, 0)
+                self._has_rule_5(out)
+            self.assertEqual(os.listdir(tmp), [])
+
+    # spec-example: skill-writing-reminder / the check runs under the session lock
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_check_runs_under_the_session_lock(self):
+        import fcntl
+        import os
+        import subprocess
+        import tempfile
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+            os.mkdir(marker_dir, 0o700)
+            os.chmod(marker_dir, 0o700)
+            lock = os.open(os.path.join(marker_dir, ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            proc = subprocess.Popen(["python3", str(SCRIPTS / self.SCRIPT)], stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    env={**os.environ, "TMPDIR": tmp})
+            try:
+                proc.stdin.write(json.dumps(self.EDIT_S1))
+                proc.stdin.close()
+                proc.stdin = None  # communicate() must not touch the closed pipe
+                time.sleep(1.0)
+                still_running = proc.poll() is None
+                open(os.path.join(marker_dir, "s-1.skill-writing"), "w").close()
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                os.close(lock)
+            out, err = proc.communicate(timeout=15)
+            self.assertTrue(still_running, "the hook must wait while another call holds the lock")
+            self.assertEqual(proc.returncode, 0, err)
+            self.assertEqual(out, "")
+
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_marker_check_comes_after_the_lock(self):
+        """Deterministic companion of the lock Example: the marker appears while the hook takes the lock."""
+        import os
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        real_flock = module.fcntl.flock
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+
+            def flock_then_mark(fd, op):
+                real_flock(fd, op)
+                if op & module.fcntl.LOCK_EX:
+                    open(os.path.join(marker_dir, "s-1.skill-writing"), "w").close()
+
+            with mock.patch.object(tempfile, "tempdir", tmp), \
+                    mock.patch.object(module.fcntl, "flock", side_effect=flock_then_mark):
+                code, out = self._run_main(module, self.EDIT_S1)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "", "the marker check must run after the lock is taken")
+
+    # spec-example: skill-writing-reminder / a lock held too long still sends the reminder
+    @unittest.skipUnless(hasattr(__import__("os"), "getuid"), "needs a user id")
+    def test_lock_held_too_long_still_sends_the_reminder(self):
+        import fcntl
+        import os
+        import tempfile
+        from unittest import mock
+        module = self._load_hook()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            marker_dir = os.path.join(tmp, self._marker_dir_name())
+            os.mkdir(marker_dir, 0o700)
+            os.chmod(marker_dir, 0o700)
+            lock = os.open(os.path.join(marker_dir, ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                with mock.patch.object(tempfile, "tempdir", tmp), \
+                        mock.patch.object(module, "LOCK_WAIT_SECONDS", 0.2):
+                    code, out = self._run_main(module, self.EDIT_S1)
+            finally:
+                os.close(lock)
+            self.assertEqual(code, 0)
+            self._has_rule_5(out)
+            self.assertEqual(sorted(os.listdir(marker_dir)), [".lock"])
 
     # spec-example: skill-writing-reminder / a failed read leaves the session unmarked
     def test_failed_read_leaves_the_session_unmarked(self):

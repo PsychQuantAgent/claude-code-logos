@@ -3,13 +3,16 @@
 
 Plugins have no rules/ component, so the rule file is never auto-loaded.
 This hook is what delivers it: when the target path is a SKILL.md, the file's
-text is added as context, once per session. The session marker lives in a
-directory private to the user under the system temp directory; a directory
-that cannot be trusted gets no marker, so the reminder is sent every time.
-The marker is written only after the context has been printed. Never decides
-the call.
+text is added as context, once per session.
+
+The session marker lives in a directory private to the user under the system
+temp directory. The hook keeps markers only where it can verify that directory
+through an open descriptor (a user id, descriptor-relative file calls,
+O_DIRECTORY, O_NOFOLLOW and fcntl); everywhere else, and whenever a check
+fails, it sends the reminder and writes no marker. The marker check, the print
+and the marker write run under a lock, and the marker is written only after
+the context has been printed. Never decides the call.
 """
-import getpass
 import json
 import os
 import pathlib
@@ -17,70 +20,94 @@ import re
 import stat
 import sys
 import tempfile
+import time
 
 RULE_FILE = pathlib.Path(__file__).resolve().parents[1] / "rules" / "skill-writing.md"
+LOCK_NAME = ".lock"
+LOCK_WAIT_SECONDS = 5
+
+try:
+    import fcntl
+except ImportError:  # not POSIX
+    fcntl = None
 
 
 def is_skill_file(path):
     return isinstance(path, str) and re.split(r"[\\/]", path)[-1] == "SKILL.md"
 
 
-def _owner_tag():
-    """The user id, or the user name where the platform has no user id (Windows)."""
-    getuid = getattr(os, "getuid", None)
-    if getuid is not None:
-        return str(getuid())
-    try:
-        name = getpass.getuser()
-    except Exception:  # getuser raises when no name can be found
-        name = "user"
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", name) or "user"
+def _can_verify():
+    """Whether this platform has what the hook needs to verify the marker directory."""
+    return (fcntl is not None and hasattr(os, "getuid")
+            and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+            and os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
+            and os.mkdir in os.supports_dir_fd and os.stat in os.supports_follow_symlinks)
 
 
-def _trusted_marker_dir():
-    """The user's private marker directory, or None when it cannot be trusted.
+def _open_marker_dir():
+    """An open descriptor of the user's private marker directory, or None when it cannot be trusted.
 
-    Trusted means: lstat shows a directory that is not a symlink, and, where the
-    platform has a user id, it is owned by the current user with no permission
-    bits for group or others.
+    Trusted means: opened relative to the temp directory without following a
+    symlink, and fstat on the open directory shows a directory owned by the
+    current user with no permission bits for group or others.
     """
-    path = os.path.join(tempfile.gettempdir(), f"skill-best-practices-{_owner_tag()}")
-    try:
-        os.mkdir(path, 0o700)
-    except FileExistsError:
-        pass
-    except OSError:
+    if not _can_verify():
         return None
     try:
-        info = os.lstat(path)
-    except OSError:
+        parent = tempfile.gettempdir()
+        parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    except Exception:  # no usable temp directory
         return None
-    # On Windows lstat does not report an NTFS junction as a symlink; the temp directory there is per-user.
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-        return None
-    getuid = getattr(os, "getuid", None)
-    if getuid is not None and (info.st_uid != getuid() or info.st_mode & 0o077):
-        return None
-    return path
-
-
-def session_marker(session_id):
-    """The marker path for this session, or None (no usable session id, or no trusted directory)."""
-    if not session_id:
-        return None
-    directory = _trusted_marker_dir()
-    if directory is None:
-        return None
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(session_id))
-    return os.path.join(directory, f"{safe}.skill-writing")
-
-
-def write_marker(marker):
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    name = f"skill-best-practices-{os.getuid()}"
     try:
-        os.close(os.open(marker, flags, 0o600))
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    except OSError:  # a symlink (ELOOP), a regular file (ENOTDIR), or no permission
+        return None
+    finally:
+        os.close(parent_fd)
+    try:
+        info = os.fstat(fd)
+        trusted = (stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+                   and not info.st_mode & 0o077)
     except OSError:
-        pass  # another hook of the session got there first, or the directory went away
+        trusted = False
+    if not trusted:
+        os.close(fd)
+        return None
+    return fd
+
+
+def _lock(dir_fd):
+    """An exclusive lock on the lock file in the marker directory, or None after LOCK_WAIT_SECONDS."""
+    try:
+        lock_fd = os.open(LOCK_NAME, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+    except OSError:
+        return None
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock_fd
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+        except OSError:
+            break
+    os.close(lock_fd)
+    return None
+
+
+def _print_context(rule):
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "additionalContext": rule,
+    }}, ensure_ascii=False))
+    sys.stdout.flush()
 
 
 def main():
@@ -97,17 +124,37 @@ def main():
         rule = RULE_FILE.read_text(encoding="utf-8")
     except OSError:
         return 0
-    marker = session_marker(payload.get("session_id"))
-    if marker is not None and os.path.lexists(marker):
+    session_id = payload.get("session_id")
+    dir_fd = _open_marker_dir() if session_id else None
+    if dir_fd is None:
+        _print_context(rule)
         return 0
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "additionalContext": rule,
-    }}, ensure_ascii=False))
-    sys.stdout.flush()
-    if marker is not None:
-        write_marker(marker)
-    return 0
+    try:
+        lock_fd = _lock(dir_fd)
+        if lock_fd is None:
+            _print_context(rule)
+            return 0
+        try:
+            marker = re.sub(r"[^A-Za-z0-9_.-]", "_", str(session_id)) + ".skill-writing"
+            try:
+                os.stat(marker, dir_fd=dir_fd, follow_symlinks=False)
+                return 0  # this session already had the reminder
+            except FileNotFoundError:
+                pass
+            except OSError:
+                _print_context(rule)
+                return 0
+            _print_context(rule)
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW
+            try:
+                os.close(os.open(marker, flags, 0o600, dir_fd=dir_fd))
+            except OSError:
+                pass
+            return 0
+        finally:
+            os.close(lock_fd)  # closing releases the lock
+    finally:
+        os.close(dir_fd)
 
 
 if __name__ == "__main__":
